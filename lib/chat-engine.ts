@@ -2040,21 +2040,33 @@ export async function buildChatPromptMessages(
             llmMessages.push({ role: "system", content: `## 线下文风要求\n${offlineStyle}` });
         }
     }
-    // 预设里没有 {{statusRegionSection}} 宏时，状态区不会进提示词。
-    // 这种情况（自定义状态栏）补一条 system 契约，保证线上/线下都能稳定产出 [状态栏] 块。
-    if (
-        statusRegionCfg.mode === "custom"
-        && statusRegionCfg.contract.trim()
-        && !presetSupportsStatusRegion((preset?.prompts || []).map(item => item.content || ""))
-    ) {
-        llmMessages.push({
-            role: "system",
-            content: [
-                "## 状态栏输出（必须遵守）",
-                statusRegionCfg.contract.trim(),
-                "整块状态栏必须用 [状态栏] 与 [/状态栏] 包裹，放在每一轮正式聊天正文之前；字段之外的说明不要写进状态栏。",
-            ].join("\n"),
-        });
+    // 状态栏契约兜底：
+    // - 线上：预设没声明 {{statusRegionSection}} 宏时，状态区不会进提示词，补一条 system 契约；
+    // - 线下：内置预设的「聊天输出格式」条目只带 chat+text 标签，不会进 offline 请求，
+    //   而且线下格式明确禁止状态标签——所以自定义状态栏在线下一律补一条覆盖说明。
+    const statusContract = statusRegionCfg.mode === "custom" ? statusRegionCfg.contract.trim() : "";
+    if (statusContract) {
+        const presetDeclaresMacro = presetSupportsStatusRegion((preset?.prompts || []).map(item => item.content || ""));
+        if (isOfflineMode || !presetDeclaresMacro) {
+            const summaryTag = preset?.story_summary_tag?.trim() || "summary";
+            llmMessages.push({
+                role: "system",
+                content: isOfflineMode
+                    ? [
+                        "## 线下模式的状态栏（覆盖上面的旧限制）",
+                        "本轮除了正文与摘要字段，必须先在回复最前面输出一块 [状态栏]，按以下契约逐行填写：",
+                        statusContract,
+                        `输出顺序：[状态栏]...[/状态栏] → <content>...</content> → <${summaryTag}>...</${summaryTag}>。`,
+                        "状态栏整块放在所有 XML 字段之外的最前面，块内每行一个字段，不要写解释或备注。",
+                        "这条规则覆盖预设中「必须只输出两个 XML 字段」「禁止输出状态标签」的限制。",
+                    ].join("\n")
+                    : [
+                        "## 状态栏输出（必须遵守）",
+                        statusContract,
+                        "整块状态栏必须用 [状态栏] 与 [/状态栏] 包裹，放在每一轮正式聊天正文之前；字段之外的说明不要写进状态栏。",
+                    ].join("\n"),
+            });
+        }
     }
     if (chineseThinkingEnabled) {
         llmMessages.push({ role: "system", content: buildChineseThinkingPrompt(
