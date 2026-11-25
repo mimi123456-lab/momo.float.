@@ -92,13 +92,6 @@ export function getVideoGenerationDailyUsage(): { used: number; limit: number } 
     return { used: readDailyCount(), limit: settings.maxDailyGenerations };
 }
 
-export function hasVideoGenerationConfigured(): boolean {
-    const settings = loadVideoGenerationSettings();
-    if (!settings.enabled) return false;
-    const preset = resolveActiveVideoPreset(settings);
-    return Boolean(preset?.baseUrl.trim() && preset.apiKey.trim() && preset.model.trim());
-}
-
 function blobToDataUrl(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -362,8 +355,4 @@ export async function generateVideoFromConfiguredApi(params: {
         usedUserReference: prepared.usedUserReference,
         usedMotionReference: prepared.usedMotionReference,
     };
-}
-
-export function videoGenerationErrorCode(error: unknown): VideoGenerationFailureCode | undefined {
-    return error instanceof VideoGenerationFailure ? error.code : undefined;
 }

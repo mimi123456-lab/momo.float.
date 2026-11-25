@@ -11,6 +11,7 @@ import {
     saveVideoGenerationSettings,
 } from "@/lib/settings-storage";
 import { storeMediaBlob } from "@/lib/media-cache-storage";
+import { getVideoGenerationDailyUsage } from "@/lib/video-generation-service";
 import { Input, Select, Textarea, Toggle } from "@/components/ui/form";
 import { Alert } from "@/components/ui/feedback";
 
@@ -27,10 +28,12 @@ export function VideoGenerationSettings() {
     const [testing, setTesting] = useState(false);
     const [testResult, setTestResult] = useState("");
     const [testError, setTestError] = useState("");
+    const [dailyUsage, setDailyUsage] = useState({ used: 0, limit: 0 });
     const fileRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         setSettings(loadVideoGenerationSettings());
+        setDailyUsage(getVideoGenerationDailyUsage());
         const image = loadImageGenerationSettings();
         setImagePresets((image.openaiPresets || []).map(preset => ({
             id: preset.id,
@@ -367,7 +370,7 @@ export function VideoGenerationSettings() {
                 {testError && <Alert variant="danger">{testError}</Alert>}
                 <div className="menu-desc flex items-start gap-2 opacity-70">
                     <Info size={14} style={{ marginTop: 2 }} />
-                    <span>测试只验证地址、Key 与视频模型是否能提交任务，不会使用参考图；正式生成前会强制校验角色参考图，缺失时直接报错且不调用接口。</span>
+                    <span>今日已生成 {dailyUsage.used} 条{dailyUsage.limit > 0 ? `（上限 ${dailyUsage.limit} 条）` : "（未设上限）"}。没有参考图时会在调用接口前直接报错，不产生费用。</span>
                 </div>
             </div>
         </div>
