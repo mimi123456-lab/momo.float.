@@ -180,6 +180,7 @@ function readScopedUserStats() {
    ══════════════════════════════════════════ */
 export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) {
     const [showFollowUpEditor, setShowFollowUpEditor] = useState(false);
+    const [showCharacterProactive, setShowCharacterProactive] = useState(false);
     const [showApiLog, setShowApiLog] = useState(false);
     const [showStickerManager, setShowStickerManager] = useState(false);
     const [showPluginManager, setShowPluginManager] = useState(false);
@@ -312,6 +313,9 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
 
     if (showFollowUpEditor) {
         return <FollowUpSettingsEditor onBack={() => { window.dispatchEvent(new CustomEvent("chat-hide-tabbar", { detail: false })); setShowFollowUpEditor(false); }} />;
+    }
+    if (showCharacterProactive) {
+        return <CharacterProactiveEditor onBack={() => { window.dispatchEvent(new CustomEvent("chat-hide-tabbar", { detail: false })); setShowCharacterProactive(false); }} />;
     }
     if (showPushSettings) {
         return <OfflinePushSettingsPage onBack={() => { window.dispatchEvent(new CustomEvent("chat-hide-tabbar", { detail: false })); setShowPushSettings(false); }} />;
@@ -500,6 +504,14 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
                             <div className="flex flex-col flex-1 text-left gap-0.5">
                                 <span className="ts-14 font-semibold text-[var(--c-text-title)]">追发规则与延迟控制</span>
                                 <span className="ts-11 text-[var(--c-text)] opacity-70">设定角色的主动回复频率与时间间隔</span>
+                            </div>
+                            <ChevronRight size={16} className="text-[var(--c-icon)] opacity-50" />
+                        </button>
+                        <button className="flex items-center gap-3 py-3.5 w-full border-t border-[color-mix(in_srgb,var(--c-card-border)_20%,transparent)]" onClick={() => { window.dispatchEvent(new CustomEvent("chat-hide-tabbar", { detail: true })); setShowCharacterProactive(true); }}>
+                            <Clock size={18} className="text-[var(--c-icon)] opacity-70" strokeWidth={1.25}/>
+                            <div className="flex flex-col flex-1 text-left gap-0.5">
+                                <span className="ts-14 font-semibold text-[var(--c-text-title)]">角色主动找我</span>
+                                <span className="ts-11 text-[var(--c-text)] opacity-70">选择角色，设置多久主动找你一次；关闭则不找你</span>
                             </div>
                             <ChevronRight size={16} className="text-[var(--c-icon)] opacity-50" />
                         </button>
@@ -745,6 +757,99 @@ function FollowUpSettingsEditor({ onBack }: { onBack: () => void }) {
                     </button>
                 </div>
 
+            </div>
+        </PageShell>
+    );
+}
+
+/* ══════════════════════════════════════════
+   角色主动找我（每个角色设置多久主动找你一次）
+   ══════════════════════════════════════════ */
+function CharacterProactiveEditor({ onBack }: { onBack: () => void }) {
+    const characters = loadCharacters();
+    const [rules, setRules] = useState<IdleReconnectRule[]>([]);
+
+    const refresh = () => setRules(loadIdleReconnectRules());
+    useEffect(() => { refresh(); }, []);
+
+    const ruleFor = (characterId: string) => rules.find(rule => rule.characterId === characterId);
+
+    const ensureSessionId = (characterId: string) => {
+        try { return createOrGetSession(characterId).id; } catch { return ""; }
+    };
+
+    const toggle = (character: Character, on: boolean) => {
+        const existing = ruleFor(character.id);
+        if (on) {
+            const sessionId = existing?.sessionId || ensureSessionId(character.id);
+            upsertIdleReconnectRule({
+                id: existing?.id || `idle-${character.id}-${Date.now()}`,
+                characterId: character.id,
+                sessionId,
+                intervalMinutes: existing?.intervalMinutes || 120,
+                intent: existing?.intent || "",
+                consecutiveCount: 0,
+                createdAt: existing?.createdAt || Date.now(),
+            });
+        } else if (existing) {
+            removeIdleReconnectRule(existing.id);
+        }
+        refresh();
+    };
+
+    const setIntervalFor = (rule: IdleReconnectRule, minutes: number) => {
+        upsertIdleReconnectRule({ ...rule, intervalMinutes: minutes });
+        refresh();
+    };
+
+    const formatInterval = (minutes: number) =>
+        minutes >= 60 && minutes % 60 === 0 ? `${minutes / 60} 小时` : `${minutes} 分钟`;
+
+    return (
+        <PageShell title="角色主动找我" onBack={onBack} className="absolute inset-0 z-[100]">
+            <div className="page-menu profile-settings-menu">
+                <p className="menu-group-desc mx-2">
+                    选择已绑定的角色，设置它多久主动找你一次。关闭开关则该角色不会主动发消息。
+                </p>
+                <div className="menu-group">
+                    {characters.length === 0 && (
+                        <div className="menu-item"><span className="menu-desc">还没有角色，先去「角色」里添加。</span></div>
+                    )}
+                    {characters.map(character => {
+                        const rule = ruleFor(character.id);
+                        const enabled = Boolean(rule);
+                        const minutes = rule?.intervalMinutes ?? 120;
+                        return (
+                            <div className="menu-item" key={character.id} style={{ flexWrap: "wrap" }}>
+                                <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-[var(--c-input)]">
+                                    {resolveChatCharacterAvatar(character) ? <img src={resolveChatCharacterAvatar(character)} alt="" className="h-full w-full object-cover" /> : <ChatFallbackAvatar />}
+                                </div>
+                                <div className="menu-label-group">
+                                    <span className="menu-label">{character.name || "未命名角色"}</span>
+                                    <span className="menu-desc">{enabled ? `每 ${formatInterval(minutes)} 主动找你` : "关闭：不主动找你"}</span>
+                                </div>
+                                <Toggle checked={enabled} onChange={value => toggle(character, value)} />
+                                {enabled && rule && (
+                                    <div className="flex items-center gap-2 w-full pl-12 pt-1 pb-2">
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            max={4320}
+                                            value={minutes}
+                                            onChange={event => {
+                                                const raw = Number(event.target.value);
+                                                if (!Number.isFinite(raw)) return;
+                                                setIntervalFor(rule, Math.min(4320, Math.max(1, Math.round(raw))));
+                                            }}
+                                            className="w-[84px] rounded-lg border border-[var(--c-card-border)] bg-transparent px-2 py-1 text-right ts-13 text-[var(--c-text)] outline-none"
+                                        />
+                                        <span className="ts-12 text-[var(--c-text)] opacity-70">分钟（60=1小时，1440=1天）</span>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
             </div>
         </PageShell>
     );

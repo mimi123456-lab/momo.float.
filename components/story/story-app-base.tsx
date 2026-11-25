@@ -539,6 +539,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
   const [schemeRepoVersion, setSchemeRepoVersion] = useState(0);
   const [storyGlobalSettings, setStoryGlobalSettings] = useState<StoryGlobalSettings>({ interruptProactiveDuringStory: false, streamingEnabled: false, timeAware: true });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 以「主页」身份打开设置页时，返回键应关闭剧情 App；从齿轮进入时返回当前剧情。
+  const [settingsAsHome, setSettingsAsHome] = useState(false);
   const [floatingPhoneOpen, setFloatingPhoneOpen] = useState(false);
   const [floatingPhoneViewportStyle, setFloatingPhoneViewportStyle] = useState<CSSProperties | undefined>(undefined);
   const [floatingPhoneTab, setFloatingPhoneTab] = useState<FloatingPhoneTab>("chat");
@@ -1495,6 +1497,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
     const now = new Date().toISOString();
     updateStorySession(currentSession.id, { endedAt: now, includedInMemoryAt: now });
     setQuickStoryOpen(false);
+    setSettingsAsHome(true);
     setSettingsOpen(true);
     try {
       incrementEventCounter(activeCharacterId);
@@ -2321,7 +2324,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
           foldTags={foldTagsDraft}
           contextExcludedTags={contextExcludedTagsDraft}
           customCSS={currentSession.customCSS || ""}
-          onClose={() => setSettingsOpen(false)}
+          onClose={() => { if (settingsAsHome) { onClose(); } else { setSettingsOpen(false); } }}
           onCharacterChange={handleStoryCharacterChange}
           onGroupSelect={handleStoryGroupSelect}
           onGroupCreate={handleStoryGroupCreate}
@@ -2404,7 +2407,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
           <div className="story-header-safe-area" />
           <div className="story-header-content">
             <div className="story-header-left">
-              <button className="story-top-btn" data-story-action="back" onClick={onClose} aria-label="关闭剧情模式">
+              <button className="story-top-btn" data-story-action="back" onClick={() => { setSettingsAsHome(true); setSettingsOpen(true); }} aria-label="返回剧情主页">
                 <SolidBackIcon size={16} />
               </button>
               <div className="story-header-person">
@@ -2420,7 +2423,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
               <button className="story-top-btn" data-story-action="beautify" onClick={() => setCssModalOpen(true)} aria-label="页面样式">
                 <PaintBrushIcon width={16} height={16} />
               </button>
-              <button className="story-top-btn" data-story-action="settings" onClick={() => setSettingsOpen(true)} aria-label="打开剧情设置">
+              <button className="story-top-btn" data-story-action="settings" onClick={() => { setSettingsAsHome(false); setSettingsOpen(true); }} aria-label="打开剧情设置">
                 <SolidMenuIcon size={16} />
               </button>
             </div>
