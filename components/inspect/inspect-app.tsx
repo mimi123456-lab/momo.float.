@@ -12,6 +12,7 @@ import { resolveUserIdentity } from "@/lib/settings-storage";
 import { generateInspectionPlan } from "@/lib/inspect-engine";
 import { executeInspectAction } from "@/lib/inspect-executor";
 import { renderInspectScreenshot } from "@/lib/inspect-screenshot";
+import { markInspectHappened } from "@/components/inspect/inspect-autopilot";
 import {
     INSPECT_APP_IDS,
     INSPECT_APP_LABELS,
@@ -38,8 +39,8 @@ const CARD_BG = "rgba(255, 255, 255, 0.74)";
 const CARD_BORDER = "rgba(95, 127, 118, 0.18)";
 const DIVIDER = "rgba(95, 127, 118, 0.12)";
 
-const FIRST_AUTO_DELAY_MS = 6000;
-const AUTO_REPEAT_MS = 120000;
+/** 自主查岗由 desktop-shell 的 InspectAutopilot 发起，这里只负责接收启动指令 */
+const PENDING_AUTOSTART_KEY = "inspect-pending-autostart";
 
 type WatchingState = {
     characterId: string;
@@ -154,7 +155,7 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
     const [chatHintSessionId, setChatHintSessionId] = useState<string | null>(null);
 
     const syncedRef = useRef(false);
-    const autoDelayRef = useRef(FIRST_AUTO_DELAY_MS);
+    const bootAutostartRef = useRef(false);
     const userNameRef = useRef("你");
 
     useEffect(() => {
@@ -190,15 +191,18 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
     const toggleForceMode = (next: boolean) => {
         setForceMode(next);
         persistSettings({ ...settings, forceMode: next });
-        autoDelayRef.current = FIRST_AUTO_DELAY_MS;
     };
 
     const selectedCharacter = characters.find(item => item.id === selectedCharacterId)
         || characters[0]
         || null;
 
-    const runInspection = useCallback(async (options?: { handedOver?: boolean; auto?: boolean }) => {
-        const character = characters.find(item => item.id === selectedCharacterId) || characters[0];
+    const runInspection = useCallback(async (options?: { handedOver?: boolean; auto?: boolean; characterId?: string }) => {
+        const character = (options?.characterId
+            ? characters.find(item => item.id === options.characterId)
+            : undefined)
+            || characters.find(item => item.id === selectedCharacterId)
+            || characters[0];
         if (!character) {
             setError("还没有角色，先去创建一个吧");
             return;
@@ -250,7 +254,7 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
                 index: 0,
                 finished: false,
             });
-            autoDelayRef.current = AUTO_REPEAT_MS;
+            markInspectHappened();
         } catch (err) {
             if (!options?.auto) setError(err instanceof Error ? err.message : "查岗失败，请稍后再试");
         } finally {
@@ -299,16 +303,24 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
         return () => window.clearTimeout(timer);
     }, [watching]);
 
-    // 强制查岗：TA 自己会隔一会儿来翻一次（看完这一轮后也会再等下一轮）
-    const watchingActive = Boolean(watching && !watching.finished);
+    // 自主查岗：TA 在别处决定要翻手机时，会先把指令写在这，进来直接开演实时画面
     useEffect(() => {
-        if (!forceMode || characters.length === 0) return;
-        if (watchingActive || generating) return;
-        const timer = window.setTimeout(() => {
-            void runInspection({ auto: true });
-        }, autoDelayRef.current);
-        return () => window.clearTimeout(timer);
-    }, [forceMode, characters.length, watchingActive, generating, runInspection]);
+        if (bootAutostartRef.current) return;
+        bootAutostartRef.current = true;
+        let raw: string | null = null;
+        try { raw = window.localStorage.getItem(PENDING_AUTOSTART_KEY); } catch { return; }
+        if (!raw) return;
+        try { window.localStorage.removeItem(PENDING_AUTOSTART_KEY); } catch { /* ignore */ }
+        try {
+            const parsed = JSON.parse(raw) as { characterId?: string; mode?: string; ts?: number };
+            if (!parsed.ts || Date.now() - parsed.ts > 60000) return;
+            if (parsed.characterId) setSelectedCharacterId(parsed.characterId);
+            const handedOver = parsed.mode === "force";
+            window.setTimeout(() => {
+                void runInspection({ handedOver, auto: true, characterId: parsed.characterId });
+            }, 400);
+        } catch { /* ignore */ }
+    }, [runInspection]);
 
     const interruptWatch = () => {
         const state = watching;
@@ -447,7 +459,7 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
                                 <div style={{ minWidth: 0 }}>
                                     <div style={{ fontSize: 12.4, fontWeight: 600, color: TEXT_MAIN }}>强制查岗</div>
                                     <div style={{ marginTop: 3, fontSize: 11, color: TEXT_FAINT }}>
-                                        打开后 TA 会自己隔一会儿来翻一次，不用你点
+                                        允许 TA 想查的时候自己来翻，一天最多一次
                                     </div>
                                 </div>
                                 <Toggle checked={forceMode} onChange={toggleForceMode} />

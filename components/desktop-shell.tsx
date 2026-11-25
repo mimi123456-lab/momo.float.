@@ -42,6 +42,7 @@ import { SmsApp } from "@/components/phone/sms-app";
 import { TheaterApp } from "@/components/theater/theater-app";
 import { CoupleSpaceApp } from "@/components/couple-space/couple-space-app";
 import { InspectApp } from "@/components/inspect/inspect-app";
+import { InspectAutopilot } from "@/components/inspect/inspect-autopilot";
 import { ShoppingApp } from "@/components/shopping/shopping-app";
 import { GameHubApp } from "@/components/game/game-hub-app";
 import { MixologyApp } from "@/components/mixology/mixology-app";
@@ -2351,6 +2352,14 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
     if (builtinIconId === "chat") setChatInitSessionId(null);
     setActiveApp(builtinIconId);
   }
+
+  const openInspectFromAutopilot = useCallback((characterId: string, mode: "force" | "ask") => {
+    try {
+      window.localStorage.setItem("inspect-pending-autostart", JSON.stringify({ characterId, mode, ts: Date.now() }));
+    } catch { /* ignore */ }
+    setChatInitSessionId(null);
+    setActiveApp("inspect");
+  }, []);
 
   const handleInstallCustomAppToDesktop = useCallback((app: InstalledCustomApp) => {
     const iconId = toCustomAppIconId(app.id);
@@ -5102,6 +5111,8 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
           </div>
         </div>
       </section>
+      {/* 自主查岗：TA 按自己的状态发起，顶部弹一张通知卡片 */}
+      <InspectAutopilot onOpenInspect={openInspectFromAutopilot} />
       {/* 微信云同步过程可视化：拉取/上传/运行包同步与失败都在这里冒 toast */}
       <WeixinSyncToast />
     </>
