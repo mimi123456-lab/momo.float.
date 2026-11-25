@@ -178,7 +178,7 @@ export const DEFAULT_THEME_PROFILE: ThemeProfile = {
   dockSkinAssetId: null,
   fontAssetId: null,
   fontFamily: DEFAULT_FONT_FAMILY,
-  hideTopBar: true,
+  hideTopBar: false,
   statusBarDropPx: 0,
   cssOverrides: {},
   globalCustomCSS: "",
