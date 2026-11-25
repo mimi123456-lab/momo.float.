@@ -12,6 +12,9 @@ export const SHOPPING_RECOMMENDATION_CATEGORIES: Array<Pick<ShoppingCategory, "i
   { id: "beauty", title: "美妆个护", subtitle: "护肤、彩妆、身体护理和仪容工具" },
   { id: "food", title: "食品饮品", subtitle: "零食、咖啡、茶饮和轻食补给" },
   { id: "hobby", title: "文具兴趣", subtitle: "纸品、手作、阅读、运动和旅行小物" },
+  { id: "intimacy", title: "情趣用品", subtitle: "私密护理、情趣玩具与亲密好物" },
+  { id: "sports", title: "运动户外", subtitle: "健身、露营、徒步和运动装备" },
+  { id: "pet", title: "宠物生活", subtitle: "主粮、零食、玩具和宠物日用" },
 ];
 
 export const DEFAULT_SHOPPING_REFRESH_PROMPT = [
@@ -21,7 +24,7 @@ export const DEFAULT_SHOPPING_REFRESH_PROMPT = [
   "要求：",
   "- 只生成可以浏览和购买的首页推荐商品，不要生成最近浏览、收藏、购物车或订单。",
   "- 不要写角色、人设、记忆、剧情或旁白。",
-  "- 必须按以下 6 个分类推荐，每个分类 5 到 7 条商品：",
+  `- 必须按以下 ${SHOPPING_RECOMMENDATION_CATEGORIES.length} 个分类推荐，每个分类 5 到 7 条商品：`,
   ...SHOPPING_RECOMMENDATION_CATEGORIES.map(category => `  - ${category.title}：${category.subtitle}`),
   "- 商品名称、店铺、价格、说明和详情都要具体，像真实可购买的商品。",
   "- [详情] 写商品本身的材质、规格、用途、质感、适用场景，不要写推荐理由或系统解释。",
@@ -47,7 +50,7 @@ export const DEFAULT_SHOPPING_REFRESH_PROMPT = [
   "[图标]商品图标",
   "",
   "规则：",
-  "- 每条商品都必须有 [分类]，且分类名只能使用上面 6 个分类名。",
+  `- 每条商品都必须有 [分类]，且分类名只能使用上面 ${SHOPPING_RECOMMENDATION_CATEGORIES.length} 个分类名。`,
   "- 每个分类连续输出 5 到 7 条商品，所有商品使用连续编号，例如 #推荐1、#推荐2、#推荐3。",
   "- 不要输出 #最近浏览、#收藏、#购物车、#订单；这些由用户交互产生。",
   "- 示例字段值都是占位说明，实际输出必须替换成真实商品内容。",
