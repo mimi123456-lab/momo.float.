@@ -4,6 +4,8 @@ export type MusicChatSharePayload = {
     artist: string;
     /** 一起听：分享后角色会收到"正在和你一起听"的提示并回应。 */
     together?: boolean;
+    /** 一起听邀请：先发出邀请卡片，等角色同意后才算一起听。 */
+    invite?: boolean;
 };
 
 export type XiaohongshuNoteChatSharePayload = {

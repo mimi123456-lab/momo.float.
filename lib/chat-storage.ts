@@ -140,6 +140,9 @@ export type ChatMessage = {
         | "accept_red_packet" | "decline_red_packet" | "accept_transfer" | "decline_transfer"
         | "payment_request" | "accept_payment_request" | "decline_payment_request"
         | "music" | "music_share" | "music_notify" | "music_not_found"
+        | "music_invite"
+        | "phone_call" | "sms_notice"
+        | "couple_invite"
         | "xiaohongshu_note_share"
         | "gift"
         | "contact_card"
@@ -223,6 +226,16 @@ export type ChatMessage = {
         blacklistUserName?: string;      // 拉黑事件发生时的用户名（用于事件详情与上下文）
         musicTitle?: string;      // 音乐标题
         musicArtist?: string;     // 音乐歌手
+        /** 一起听邀请：用户发起，等待角色回应；角色回复同意/拒绝后落定。 */
+        musicInviteStatus?: "pending" | "accepted" | "declined" | "canceled";
+        musicInviteFrom?: "user" | "character";
+        musicInviteResolvedAt?: string;
+        /** 角色从手机系统发起的来电。 */
+        phoneCallStatus?: "pending" | "accepted" | "declined";
+        /** 角色发来的系统短信内容。 */
+        smsBody?: string;
+        /** 情侣空间邀请状态（角色主动发起，24 小时有效）。 */
+        coupleInviteStatus?: "pending" | "accepted" | "declined";
         xiaohongshuAuthor?: string;       // 小红书分享作者
         xiaohongshuTitle?: string;        // 小红书分享标题
         xiaohongshuBody?: string;         // 小红书分享正文

@@ -45,6 +45,10 @@ interface MessageBubbleProps {
     onMusicPlay?: (title: string, artist?: string) => void;
     onActionSelect?: (text: string) => void;
     onMeetingInviteAction?: (msg: ChatMessage, action: "accept" | "story" | "decline") => void;
+    onMusicInviteAction?: (msg: ChatMessage, action: "accept" | "decline" | "cancel") => void;
+    onPhoneCallAction?: (msg: ChatMessage, action: "accept" | "decline") => void;
+    onOpenSms?: (msg: ChatMessage) => void;
+    onCoupleInviteAction?: (msg: ChatMessage, action: "accept" | "decline") => void;
     displayContent?: string;
     defaultTranslationExpanded?: boolean;
     onFavoriteMedia?: (msg: ChatMessage) => void | Promise<void>;
@@ -91,7 +95,7 @@ function PluginKindBubble({ msg, kind }: { msg: ChatMessage; kind: string }) {
  * Renders a message bubble based on its mediaType.
  * Falls back to ReactMarkdown for plain text messages.
  */
-export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charName, userName, onSystemMessage, groupSize, onShowDetail, characterId, onMusicPlay, onActionSelect, onMeetingInviteAction, displayContent, defaultTranslationExpanded = false, onFavoriteMedia }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charName, userName, onSystemMessage, groupSize, onShowDetail, characterId, onMusicPlay, onActionSelect, onMeetingInviteAction, onMusicInviteAction, onPhoneCallAction, onOpenSms, onCoupleInviteAction, displayContent, defaultTranslationExpanded = false, onFavoriteMedia }: MessageBubbleProps) {
     switch (msg.mediaType) {
         case "red_packet":
             return <RedPacketBubble msg={msg} charName={charName} userName={userName} groupSize={groupSize} onShowDetail={onShowDetail} />;
@@ -119,6 +123,14 @@ export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charNa
             return <QuoteBubble msg={msg} displayContent={displayContent} defaultTranslationExpanded={defaultTranslationExpanded} />;
         case "music_share":
             return <MusicShareBubble msg={msg} onPlay={onMusicPlay} />;
+        case "music_invite":
+            return <MusicInviteBubble msg={msg} charName={charName} onAction={onMusicInviteAction} />;
+        case "phone_call":
+            return <PhoneCallBubble msg={msg} charName={charName} onAction={onPhoneCallAction} />;
+        case "sms_notice":
+            return <SmsNoticeBubble msg={msg} charName={charName} onOpen={onOpenSms} />;
+        case "couple_invite":
+            return <CoupleInviteBubble msg={msg} charName={charName} onAction={onCoupleInviteAction} />;
         case "media_file":
             return <MediaFileBubble msg={msg} onUpdate={onUpdate} characterId={characterId} />;
         case "xiaohongshu_note_share":
@@ -160,6 +172,9 @@ export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charNa
         if (prev.msg.mediaData?.imageGenerationStatus !== next.msg.mediaData?.imageGenerationStatus) return false;
         if (prev.msg.mediaData?.imageGenerationError !== next.msg.mediaData?.imageGenerationError) return false;
         if (prev.msg.mediaData?.meetingInviteStatus !== next.msg.mediaData?.meetingInviteStatus) return false;
+        if (prev.msg.mediaData?.musicInviteStatus !== next.msg.mediaData?.musicInviteStatus) return false;
+        if (prev.msg.mediaData?.phoneCallStatus !== next.msg.mediaData?.phoneCallStatus) return false;
+        if (prev.msg.mediaData?.coupleInviteStatus !== next.msg.mediaData?.coupleInviteStatus) return false;
         if (prev.msg.mediaUrl !== next.msg.mediaUrl) return false;
     }
     if (prev.charName !== next.charName) return false;
@@ -2309,8 +2324,192 @@ function MusicShareBubble({ msg, onPlay }: { msg: ChatMessage; onPlay?: (title: 
     );
 }
 
-// ── Xiaohongshu Share Bubble ──────────────────────────
+/**
+ * 一起听邀请卡：用户邀请角色一起听歌，等待角色回应；角色同意/拒绝后状态落定。
+ */
+function MusicInviteBubble({
+    msg,
+    charName,
+    onAction,
+}: {
+    msg: ChatMessage;
+    charName?: string;
+    onAction?: (msg: ChatMessage, action: "accept" | "decline" | "cancel") => void;
+}) {
+    const status = msg.mediaData?.musicInviteStatus || "pending";
+    const title = msg.mediaData?.musicTitle || "未知歌曲";
+    const artist = msg.mediaData?.musicArtist || "";
+    const fromCharacter = msg.mediaData?.musicInviteFrom === "character";
+    const inviter = fromCharacter ? (charName || "TA") : "你";
 
+    const statusText = status === "accepted"
+        ? (fromCharacter ? "已同意 · 正在一起听" : "TA 同意了 · 正在一起听")
+        : status === "declined"
+            ? (fromCharacter ? "你婉拒了这次邀请" : "TA 婉拒了这次邀请")
+            : status === "canceled"
+                ? "邀请已取消"
+                : "等待回应…";
+    const statusColor = status === "accepted"
+        ? "var(--c-music-accent, #7c9a92)"
+        : status === "declined" || status === "canceled"
+            ? "var(--c-text-secondary, #8a8a8a)"
+            : "var(--c-text-secondary, #8a8a8a)";
+
+    return (
+        <div className="chat-music-share-card" style={{ cursor: "default" }}>
+            <div className="chat-music-share-body">
+                <div className="chat-music-share-cover">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-music-accent, #7c9a92)" strokeWidth="1.2">
+                        <path d="M4 14v-2a8 8 0 0 1 16 0v2" /><rect x="2" y="14" width="4" height="6" rx="1.5" /><rect x="18" y="14" width="4" height="6" rx="1.5" />
+                    </svg>
+                </div>
+                <div className="chat-music-share-info">
+                    <div className="chat-music-share-title">{title}</div>
+                    {artist && <div className="chat-music-share-artist">{artist}</div>}
+                </div>
+            </div>
+            <div className="chat-music-share-footer" style={{ justifyContent: "space-between", gap: 8 }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, color: statusColor }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 3a6 6 0 0 0-6 6v4l-2 3h16l-2-3V9a6 6 0 0 0-6-6Z" /><path d="M10 19a2 2 0 0 0 4 0" />
+                    </svg>
+                    <span>{inviter}邀请一起听 · {statusText}</span>
+                </span>
+                {status === "pending" && (
+                    fromCharacter ? (
+                        <span style={{ display: "inline-flex", gap: 6 }}>
+                            <button type="button" className="ui-btn ui-btn-soft-action" style={{ padding: "2px 10px", fontSize: 12 }} onClick={(e) => { e.stopPropagation(); onAction?.(msg, "accept"); }}>同意</button>
+                            <button type="button" className="ui-btn ui-btn-outline" style={{ padding: "2px 10px", fontSize: 12 }} onClick={(e) => { e.stopPropagation(); onAction?.(msg, "decline"); }}>拒绝</button>
+                        </span>
+                    ) : (
+                        <button type="button" className="ui-btn ui-btn-outline" style={{ padding: "2px 10px", fontSize: 12 }} onClick={(e) => { e.stopPropagation(); onAction?.(msg, "cancel"); }}>取消邀请</button>
+                    )
+                )}
+            </div>
+        </div>
+    );
+}
+
+/**
+ * 手机系统来电卡：微信之外的独立电话，可直接接听或拒接。
+ */
+function PhoneCallBubble({
+    msg,
+    charName,
+    onAction,
+}: {
+    msg: ChatMessage;
+    charName?: string;
+    onAction?: (msg: ChatMessage, action: "accept" | "decline") => void;
+}) {
+    const status = msg.mediaData?.phoneCallStatus || "pending";
+    const caller = charName || "TA";
+    const statusText = status === "accepted" ? "已接听" : status === "declined" ? "已拒接" : "正在拨打你的手机";
+    return (
+        <div className="chat-music-share-card" style={{ cursor: "default" }}>
+            <div className="chat-music-share-body">
+                <div className="chat-music-share-cover">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-music-accent, #7c9a92)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M4.5 4.5h4l1.6 4-2 1.6a13 13 0 0 0 5.8 5.8l1.6-2 4 1.6v4a2 2 0 0 1-2.2 2A16.5 16.5 0 0 1 2.5 6.7 2 2 0 0 1 4.5 4.5Z" />
+                    </svg>
+                </div>
+                <div className="chat-music-share-info">
+                    <div className="chat-music-share-title">{caller}的来电</div>
+                    <div className="chat-music-share-artist">系统电话 · {statusText}</div>
+                </div>
+            </div>
+            <div className="chat-music-share-footer" style={{ justifyContent: "flex-end", gap: 8 }}>
+                {status === "pending" ? (
+                    <>
+                        <button type="button" className="ui-btn ui-btn-outline" style={{ padding: "3px 12px", fontSize: 12 }} onClick={(e) => { e.stopPropagation(); onAction?.(msg, "decline"); }}>拒接</button>
+                        <button type="button" className="ui-btn ui-btn-soft-action" style={{ padding: "3px 12px", fontSize: 12 }} onClick={(e) => { e.stopPropagation(); onAction?.(msg, "accept"); }}>接听</button>
+                    </>
+                ) : (
+                    <span style={{ fontSize: 12, color: "var(--c-text-secondary, #8a8a8a)" }}>{statusText}</span>
+                )}
+            </div>
+        </div>
+    );
+}
+
+/**
+ * 系统短信卡：角色绕过微信，直接给你的手机发了短信。
+ */
+function SmsNoticeBubble({
+    msg,
+    charName,
+    onOpen,
+}: {
+    msg: ChatMessage;
+    charName?: string;
+    onOpen?: (msg: ChatMessage) => void;
+}) {
+    const sender = charName || "TA";
+    return (
+        <div className="chat-music-share-card" style={{ cursor: "default" }}>
+            <div className="chat-music-share-body" style={{ alignItems: "flex-start" }}>
+                <div className="chat-music-share-cover">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-music-accent, #7c9a92)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="5" width="18" height="14" rx="3" /><path d="m4 7 8 6 8-6" />
+                    </svg>
+                </div>
+                <div className="chat-music-share-info">
+                    <div className="chat-music-share-title">来自{sender}的短信</div>
+                    <div style={{ fontSize: 14, color: "var(--c-text)", marginTop: 4, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                        {msg.mediaData?.smsBody || msg.content}
+                    </div>
+                </div>
+            </div>
+            <div className="chat-music-share-footer" style={{ justifyContent: "flex-end" }}>
+                <button type="button" className="ui-btn ui-btn-outline" style={{ padding: "3px 12px", fontSize: 12 }} onClick={(e) => { e.stopPropagation(); onOpen?.(msg); }}>打开短信</button>
+            </div>
+        </div>
+    );
+}
+
+/**
+ * 情侣空间邀请卡：角色主动邀请，24 小时内有效，拒绝后可再次申请。
+ */
+function CoupleInviteBubble({
+    msg,
+    charName,
+    onAction,
+}: {
+    msg: ChatMessage;
+    charName?: string;
+    onAction?: (msg: ChatMessage, action: "accept" | "decline") => void;
+}) {
+    const status = msg.mediaData?.coupleInviteStatus || "pending";
+    const inviter = charName || "TA";
+    const statusText = status === "accepted" ? "已同意 · 情侣空间已开启" : status === "declined" ? "已拒绝 · 还可以再申请" : "邀请 24 小时内有效";
+    return (
+        <div className="chat-music-share-card" style={{ cursor: "default", background: "linear-gradient(150deg, rgba(224,106,134,0.14), rgba(255,255,255,0.6))" }}>
+            <div className="chat-music-share-body">
+                <div className="chat-music-share-cover" style={{ background: "rgba(224,106,134,0.14)" }}>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#e06a86" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 20s-7-4.6-7-9.4A4.2 4.2 0 0 1 12 7a4.2 4.2 0 0 1 7 3.6C19 15.4 12 20 12 20Z" />
+                    </svg>
+                </div>
+                <div className="chat-music-share-info">
+                    <div className="chat-music-share-title">{inviter}想和你开启情侣空间</div>
+                    <div className="chat-music-share-artist">{statusText}</div>
+                </div>
+            </div>
+            <div className="chat-music-share-footer" style={{ justifyContent: "flex-end", gap: 8 }}>
+                {status === "pending" ? (
+                    <>
+                        <button type="button" className="ui-btn ui-btn-outline" style={{ padding: "3px 12px", fontSize: 12 }} onClick={(e) => { e.stopPropagation(); onAction?.(msg, "decline"); }}>暂时不要</button>
+                        <button type="button" className="ui-btn ui-btn-soft-action" style={{ padding: "3px 12px", fontSize: 12 }} onClick={(e) => { e.stopPropagation(); onAction?.(msg, "accept"); }}>同意</button>
+                    </>
+                ) : (
+                    <span style={{ fontSize: 12, color: "var(--c-text-secondary, #8a8a8a)" }}>{statusText}</span>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// ── Xiaohongshu Share Bubble ──────────────────────────
 function XiaohongshuShareBubble({ msg }: { msg: ChatMessage }) {
     const data = msg.mediaData;
     const title = data?.xiaohongshuTitle || "小红书帖子";

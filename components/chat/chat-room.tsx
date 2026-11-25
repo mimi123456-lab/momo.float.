@@ -94,6 +94,8 @@ import { emitChatPluginEvent, getChatPluginHookBus, runChatPluginTransform } fro
 import { CHAT_PLUGIN_TOAST_EVENT, getChatPluginRuntime } from "@/lib/chat-plugin-runtime";
 import { ChatPluginSlot } from "@/components/chat/chat-plugin-slot";
 import { addChatFavorite } from "@/lib/favorites-storage";
+import { appendSmsMessage } from "@/lib/sms-storage";
+import { createCoupleInvite, createCoupleSpace, loadCoupleInvite, loadCoupleSpace, resolveCoupleInvite } from "@/lib/couple-space-storage";
 import {
     createOrGetStorySession,
     hydrateStoryStorage,
@@ -2965,7 +2967,7 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
             ? getLatestStateValues(session.id)
             : getLatestCharacterStateValues(session.contactId);
 
-        const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue, characterRemarkForUser } = parseAIResponse(aiResponseText, previousState);
+        const { parts: rawParts, stateValues, freshStateValues, statusPanel, innerMonologue, characterRemarkForUser, musicInviteResponse } = parseAIResponse(aiResponseText, previousState);
         if (!session.isGroup && characterRemarkForUser) {
             const normalizedRemark = characterRemarkForUser.replace(/[\r\n]/g, " ").trim().slice(0, 20);
             if (normalizedRemark) {
@@ -2991,6 +2993,45 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
         }
         const parts = stripInvalidStickerParts(rawParts);
         throwIfGenerationStopped(options);
+
+        // 系统短信：角色主动发来的短信同步存进短信 App，不写入长期记忆。
+        if (!session.isGroup) {
+            parts.filter(part => part.mediaType === "sms_notice").forEach(part => {
+                const body = part.mediaData?.smsBody || part.content || "";
+                if (body) appendSmsMessage(session.contactId, character?.name || "TA", "character", body);
+            });
+            // 情侣空间邀请卡：同时登记 24 小时有效的邀请记录。
+            if (parts.some(part => part.mediaType === "couple_invite")) {
+                const existing = loadCoupleInvite(session.contactId);
+                if (!existing || existing.status !== "pending") {
+                    createCoupleInvite(session.contactId, character?.name || "TA");
+                }
+            }
+        }
+
+        // 一起听邀请：角色回复中带 [一起听:同意/拒绝] 时，落定最近一条待回应邀请。
+        if (musicInviteResponse && !session.isGroup) {
+            const pendingInvite = loadChatMessages(session.id)
+                .filter((item) => item.mediaType === "music_invite" && item.mediaData?.musicInviteStatus === "pending")
+                .pop();
+            if (pendingInvite) {
+                const resolvedAt = new Date().toISOString();
+                const nextMediaData: ChatMessage["mediaData"] = {
+                    ...pendingInvite.mediaData,
+                    musicInviteStatus: musicInviteResponse,
+                    musicInviteResolvedAt: resolvedAt,
+                };
+                updateMessageMediaData(pendingInvite.id, nextMediaData);
+                setMessages((current) => current.map((item) => item.id === pendingInvite.id ? { ...item, mediaData: nextMediaData } : item));
+                dispatchChatMessageNotice({
+                    sessionId: session.id,
+                    senderName: character?.name || "TA",
+                    body: musicInviteResponse === "accepted"
+                        ? `${character?.name || "TA"}同意了和你一起听歌`
+                        : `${character?.name || "TA"}婉拒了一起听邀请`,
+                });
+            }
+        }
 
         // Detect call triggers and AI media actions, filter them out
         let triggerCall: "voice" | "video" | undefined;
@@ -4324,6 +4365,79 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
             handleOfflineSend(opening);
         } catch (error) {
             showChatToast(error instanceof Error ? error.message : "进入见面失败，请稍后再试");
+        }
+    };
+
+    const handleMusicInviteAction = (invite: ChatMessage, action: "accept" | "decline" | "cancel") => {
+        if (invite.mediaData?.musicInviteStatus && invite.mediaData.musicInviteStatus !== "pending") return;
+        const resolvedAt = new Date().toISOString();
+        const status = action === "accept" ? "accepted" : action === "decline" ? "declined" : "canceled";
+        const nextMediaData: ChatMessage["mediaData"] = {
+            ...invite.mediaData,
+            musicInviteStatus: status,
+            musicInviteResolvedAt: resolvedAt,
+        };
+        updateMessageMediaData(invite.id, nextMediaData);
+        setMessages((current) => current.map((item) => item.id === invite.id ? { ...item, mediaData: nextMediaData } : item));
+        if (action === "cancel") {
+            showChatToast("已取消一起听邀请");
+            return;
+        }
+        if (action === "accept") {
+            showChatToast("已开始一起听");
+            handleSendText("好呀，一起听。", { autoReply: true });
+        } else {
+            handleSendText("这次先不了。", { autoReply: true });
+        }
+    };
+
+    const handlePhoneCallAction = (invite: ChatMessage, action: "accept" | "decline") => {
+        if (invite.mediaData?.phoneCallStatus && invite.mediaData.phoneCallStatus !== "pending") return;
+        const nextMediaData: ChatMessage["mediaData"] = {
+            ...invite.mediaData,
+            phoneCallStatus: action === "accept" ? "accepted" : "declined",
+        };
+        updateMessageMediaData(invite.id, nextMediaData);
+        setMessages((current) => current.map((item) => item.id === invite.id ? { ...item, mediaData: nextMediaData } : item));
+        if (action === "accept") {
+            window.dispatchEvent(new CustomEvent("open-app", { detail: { appId: "phone" } }));
+            window.setTimeout(() => {
+                window.dispatchEvent(new CustomEvent("phone-incoming-call", { detail: { characterId: session.contactId } }));
+            }, 350);
+            handleSendText("（接起手机）", { autoReply: true });
+        } else {
+            showChatToast("已拒接手机来电");
+            handleSendText("（拒接了手机来电）", { autoReply: true });
+        }
+    };
+
+    const handleOpenSmsNotice = (notice: ChatMessage) => {
+        window.dispatchEvent(new CustomEvent("open-app", { detail: { appId: "sms" } }));
+        window.setTimeout(() => {
+            window.dispatchEvent(new CustomEvent("sms-open-thread", { detail: { characterId: session.contactId } }));
+        }, 350);
+        void notice;
+    };
+
+    const handleCoupleInviteAction = (invite: ChatMessage, action: "accept" | "decline") => {
+        if (invite.mediaData?.coupleInviteStatus && invite.mediaData.coupleInviteStatus !== "pending") return;
+        const nextMediaData: ChatMessage["mediaData"] = {
+            ...invite.mediaData,
+            coupleInviteStatus: action === "accept" ? "accepted" : "declined",
+        };
+        updateMessageMediaData(invite.id, nextMediaData);
+        setMessages((current) => current.map((item) => item.id === invite.id ? { ...item, mediaData: nextMediaData } : item));
+        const characterId = session.contactId;
+        const characterName = character?.name || "TA";
+        resolveCoupleInvite(characterId, action === "accept" ? "accepted" : "declined");
+        if (action === "accept") {
+            if (!loadCoupleSpace(characterId)) createCoupleSpace(characterId, characterName);
+            showChatToast("情侣空间已开启");
+            window.dispatchEvent(new CustomEvent("open-app", { detail: { appId: "couplespace" } }));
+            handleSendText("好呀，我们一起开一个情侣空间。", { autoReply: true });
+        } else {
+            showChatToast("已婉拒，TA 之后还可以再邀请你");
+            handleSendText("这次先不要啦，以后再说。", { autoReply: true });
         }
     };
 
@@ -6525,6 +6639,10 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
                                                 onMusicPlay={handleMusicCardPlay}
                                                 onActionSelect={(text) => chatTextInputRef.current?.appendText(text)}
                                                 onMeetingInviteAction={handleMeetingInviteAction}
+                                                onMusicInviteAction={handleMusicInviteAction}
+                                                onPhoneCallAction={handlePhoneCallAction}
+                                                onOpenSms={handleOpenSmsNotice}
+                                                onCoupleInviteAction={handleCoupleInviteAction}
                                                 defaultTranslationExpanded={session.collapseBilingualTranslation !== false ? false : true}
                                             />
                                         </div>

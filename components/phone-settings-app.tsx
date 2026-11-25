@@ -27,6 +27,7 @@ import { CardGrid, FeaturedCard, type CardItem, type FeaturedCardItem } from "./
 import { GlassIcon } from "./ui/glass-icon";
 import { Toggle } from "./ui/form";
 import { loadChatAppSettings, saveChatAppSettings } from "@/lib/chat-storage";
+import { loadApiConfigs, loadBindingConfig, saveBindingConfig } from "@/lib/settings-storage";
 import { loadKeepAlive, saveKeepAlive } from "@/lib/weixin-storage";
 import { BINDING_ACCENTS, CONTENT_APP_ACCENTS } from "@/lib/ui-accent-colors";
 
@@ -40,6 +41,58 @@ type SettingsPageProps = {
     onClose: () => void;
     onNotice: (msg: string) => void;
 };
+
+/** 设置首页顶部的「API 接入」快捷选择：直接切换全局默认 API。 */
+function QuickApiCard({ onNotice }: { onNotice: (msg: string) => void }) {
+    const [configs, setConfigs] = useState(() => loadApiConfigs());
+    const [currentId, setCurrentId] = useState(() => loadBindingConfig().globalDefaults?.apiConfigId || "");
+
+    useEffect(() => {
+        const sync = () => {
+            const next = loadApiConfigs();
+            const binding = loadBindingConfig();
+            setConfigs(next);
+            setCurrentId(binding.globalDefaults?.apiConfigId || next[0]?.id || "");
+        };
+        sync();
+        const timers = [500, 1500].map(ms => window.setTimeout(sync, ms));
+        window.addEventListener("settings-bindings-updated", sync);
+        window.addEventListener("settings-api-updated", sync);
+        return () => {
+            timers.forEach(t => window.clearTimeout(t));
+            window.removeEventListener("settings-bindings-updated", sync);
+            window.removeEventListener("settings-api-updated", sync);
+        };
+    }, []);
+
+    if (configs.length === 0) return null;
+    const effectiveId = configs.some(item => item.id === currentId) ? currentId : configs[0]?.id || "";
+    return (
+        <div className="app-card card-featured" style={{ marginTop: 10 }}>
+            <span className="card-icon card-icon-glass"><GlassIcon name="api" /></span>
+            <div className="card-featured-body">
+                <div className="card-featured-label">API 接入</div>
+                <div className="card-featured-desc">聊天、电话、短信、小剧场等共用的默认模型接口</div>
+                <select
+                    value={effectiveId}
+                    onChange={(e) => {
+                        const binding = loadBindingConfig();
+                        binding.globalDefaults = { ...binding.globalDefaults, apiConfigId: e.target.value };
+                        saveBindingConfig(binding);
+                        setCurrentId(e.target.value);
+                        onNotice("已切换默认 API 接入");
+                    }}
+                    className="ui-input"
+                    style={{ marginTop: 8, width: "100%" }}
+                >
+                    {configs.map(item => (
+                        <option key={item.id} value={item.id}>{item.name || item.defaultModel || item.provider}</option>
+                    ))}
+                </select>
+            </div>
+        </div>
+    );
+}
 
 type SubPage =
     | "main"
@@ -399,6 +452,7 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
                             labelClassName="settings-menu-section-title"
                             items={SETTINGS_MENU.filter(item => ["api", "voice"].includes(item.id)).map(makeCardItem)}
                         />
+                        <QuickApiCard onNotice={onNotice} />
                         <div className="settings-data-rules-section">
                             <h3 className="settings-menu-section-title">Data & Rules</h3>
                             <div className="mt-[10px] flex flex-col gap-3">

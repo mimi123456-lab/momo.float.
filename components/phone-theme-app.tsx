@@ -23,7 +23,7 @@ import CSSSchemeBar from "@/components/ui/css-scheme-picker";
 import { GlassIcon } from "@/components/ui/glass-icon";
 import { normalizeThemeProfile, resolveActiveIconSkins, DEFAULT_THEME_PROFILE, type ThemeProfile } from "@/lib/theme-types";
 import type { DesktopIconId, IconId } from "@/lib/desktop-config";
-import { DOCK_DEFAULT, PAGE_1_DEFAULT, PAGE_2_DEFAULT, PAGE_3_DEFAULT, ICONS } from "@/lib/desktop-config";
+import { DOCK_DEFAULT, PAGE_1_DEFAULT, PAGE_2_DEFAULT, PAGE_3_DEFAULT, PAGE_4_DEFAULT, ICONS } from "@/lib/desktop-config";
 import type { DesktopFolderMap, DesktopIconLayout } from "@/lib/desktop-layout-storage";
 import { CUSTOM_APPS_UPDATED_EVENT, loadInstalledCustomApps } from "@/lib/custom-app-storage";
 import { toCustomAppIconId, type InstalledCustomApp } from "@/lib/custom-app-types";
@@ -56,6 +56,7 @@ import {
 import { BINDING_ACCENTS } from "@/lib/ui-accent-colors";
 import { ConfirmDialog, ContentDialog } from "@/components/ui/modal";
 import type { DIYWidgetTemplate } from "@/lib/widget-types";
+import { APP_CSS_TARGETS, loadAppCustomCSS, saveAppCustomCSS, type AppCssTargetId } from "@/lib/app-custom-css";
 import { DIYWidgetEditor } from "@/components/widgets/diy-widget-editor";
 import {
   createThemePackageBlob,
@@ -78,6 +79,7 @@ type ThemeSection =
   | "widgets"
   | "case"
   | "text"
+  | "appcss"
   | "css";
 
 type ThemeMenuItemSection = Exclude<ThemeSection, "menu"> | "presets" | "transfer" | "reset";
@@ -166,6 +168,7 @@ const MENU_ITEMS: Array<{
   { section: "widgets", icon: IconWidgets, label: "桌面组件", desc: "小组件", color: BINDING_ACCENTS.voice, glow: `color-mix(in srgb, ${BINDING_ACCENTS.voice} 35%, transparent)`, glass: "widgets" },
   { section: "case", icon: IconCase, label: "状态栏", color: BINDING_ACCENTS.memory, glass: "status-bar" },
   { section: "text", icon: IconText, label: "文字", color: BINDING_ACCENTS.identity, glow: `color-mix(in srgb, ${BINDING_ACCENTS.identity} 35%, transparent)`, glass: "text" },
+  { section: "appcss", icon: IconCode, label: "App 外观", desc: "音乐 / 电话 / 短信等单独美化", color: BINDING_ACCENTS.identity, glow: `color-mix(in srgb, ${BINDING_ACCENTS.identity} 30%, transparent)`, glass: "css" },
   { section: "css", icon: IconCode, label: "CSS 变量", desc: "自定义全局样式变量", color: BINDING_ACCENTS.embedding, glow: `color-mix(in srgb, ${BINDING_ACCENTS.embedding} 35%, transparent)`, glass: "css" },
   { section: "presets", icon: IconPresets, label: "主题预设", desc: "保存、切换与管理", color: BINDING_ACCENTS.preset, glow: `color-mix(in srgb, ${BINDING_ACCENTS.preset} 35%, transparent)`, glass: "theme-transfer" },
   { section: "transfer", icon: IconTransfer, label: "主题导入 / 导出", desc: "备份与迁移", color: BINDING_ACCENTS.api, glow: `color-mix(in srgb, ${BINDING_ACCENTS.api} 35%, transparent)`, glass: "theme-transfer" },
@@ -183,10 +186,11 @@ const SECTION_TITLES: Record<Exclude<ThemeSection, "menu">, string> = {
   widgets: "\u684C\u9762\u7EC4\u4EF6",
   case: "\u624B\u673A\u58F3",
   text: "\u6587\u5B57",
+  appcss: "App \u5916\u89C2",
   css: "CSS \u53D8\u91CF",
 };
 
-const THEME_SECTIONS = new Set<string>(["menu", "palette", "wallpaper", "icons", "widgets", "case", "text", "css"]);
+const THEME_SECTIONS = new Set<string>(["menu", "palette", "wallpaper", "icons", "widgets", "case", "text", "appcss", "css"]);
 
 function isThemeSection(value: string): value is ThemeSection {
   return THEME_SECTIONS.has(value);
@@ -471,6 +475,7 @@ export function PhoneThemeApp({
             {/* Section 4: 高级 — Featured card for CSS */}
             {(() => {
               const cssItem = MENU_ITEMS.find(i => i.section === "css")!;
+              const appCssItem = MENU_ITEMS.find(i => i.section === "appcss")!;
               return (
                 <div>
                   <h3 className="appearance-menu-section-title">Advanced</h3>
@@ -485,6 +490,20 @@ export function PhoneThemeApp({
                     <div className="card-featured-body">
                       <div className="card-featured-label">{cssItem.label}</div>
                       <div className="card-featured-desc">{cssItem.desc}</div>
+                    </div>
+                    <span className="card-featured-chevron"><IconChevronRight /></span>
+                  </button>
+                  <button
+                    className="app-card card-featured mt-2.5"
+                    type="button"
+                    onClick={() => setSection("appcss")}
+                  >
+                    <span className="card-icon" style={menuIconStyle(appCssItem.color)}>
+                      <Code2 size={21} strokeWidth={1.75} />
+                    </span>
+                    <div className="card-featured-body">
+                      <div className="card-featured-label">{appCssItem.label}</div>
+                      <div className="card-featured-desc">{appCssItem.desc}</div>
                     </div>
                     <span className="card-featured-chevron"><IconChevronRight /></span>
                   </button>
@@ -541,6 +560,8 @@ export function PhoneThemeApp({
           <PalettePresetPage draft={draft} onDraftChange={onDraftChange} onApply={onApply} onNotice={onNotice} />
         ) : section === "css" ? (
           <GlobalCSSPage draft={draft} onDraftChange={onDraftChange} onApply={onApply} onNotice={onNotice} />
+        ) : section === "appcss" ? (
+          <AppCSSPage onNotice={onNotice} />
         ) : section === "icons" ? (
           <IconSkinPage draft={draft} onDraftChange={onDraftChange} onApply={onApply} onNotice={onNotice} />
         ) : (
@@ -1175,13 +1196,57 @@ function GlobalCSSPage({
   );
 }
 
+function AppCSSPage({ onNotice }: { onNotice: (text: string) => void }) {
+  const [target, setTarget] = useState<AppCssTargetId>("music");
+  const [draftCss, setDraftCss] = useState(() => (typeof window === "undefined" ? "" : loadAppCustomCSS("music")));
+
+  useEffect(() => {
+    setDraftCss(loadAppCustomCSS(target));
+  }, [target]);
+
+  const meta = APP_CSS_TARGETS.find(item => item.id === target);
+
+  return (
+    <div className="theme-section-page">
+      <p className="ts-13 text-[var(--c-text)] mb-3 leading-relaxed">
+        为单个 App 写 CSS，只会作用在对应界面上。选择 App 后编写，点「保存」立即生效。
+      </p>
+      <div className="flex gap-2 flex-wrap mb-3">
+        {APP_CSS_TARGETS.map(item => (
+          <button
+            key={item.id}
+            type="button"
+            className={`ui-btn ${target === item.id ? "ui-btn-soft-action" : "ui-btn-outline"}`}
+            style={{ padding: "4px 12px", fontSize: 13 }}
+            onClick={() => setTarget(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      {meta && <p className="ts-12 text-[var(--c-text-secondary)] mb-2">{meta.desc} · 作用域 data-app-css=&quot;{meta.id}&quot;</p>}
+      <textarea
+        className="ui-textarea font-mono ts-13 leading-relaxed flex-1"
+        style={{ minHeight: 240, resize: "none", scrollbarWidth: "none" }}
+        placeholder={`/* ${meta?.label ?? ""} */\n[data-app-css="${target}"] .some-class {\n  border-radius: 16px;\n}`}
+        value={draftCss}
+        onChange={(e) => setDraftCss(e.target.value)}
+        spellCheck={false}
+      />
+      <div className="flex gap-2 mt-3 items-center">
+        <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={() => { setDraftCss(""); saveAppCustomCSS(target, ""); onNotice("已清空该 App 的自定义 CSS"); }}>清除</button>
+        <button type="button" className="ui-btn ui-btn-soft-action flex-1" onClick={() => { saveAppCustomCSS(target, draftCss); onNotice(`已保存 ${meta?.label ?? ""} 外观`); }}>保存</button>
+      </div>
+    </div>
+  );
+}
+
 /* ══════════════════════════════════════════
    Icon Skin Page
    ══════════════════════════════════════════ */
-
 // 三页桌面 + DOCK 的默认图标全收进来。漏了第三页时，筑境/工坊/资源集市/独家特调
 // 这四个图标在外观里根本没有格子，换不了皮肤。
-const BUILTIN_ICON_SKIN_IDS: IconId[] = [...PAGE_1_DEFAULT, ...PAGE_2_DEFAULT, ...PAGE_3_DEFAULT, ...DOCK_DEFAULT];
+const BUILTIN_ICON_SKIN_IDS: IconId[] = [...PAGE_1_DEFAULT, ...PAGE_2_DEFAULT, ...PAGE_3_DEFAULT, ...PAGE_4_DEFAULT, ...DOCK_DEFAULT];
 
 type IconSkinItem = {
   id: DesktopIconId;

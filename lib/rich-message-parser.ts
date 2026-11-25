@@ -40,6 +40,8 @@ export interface ParsedAIResponse {
     innerMonologue: string;
     /** 角色在回复中主动设置的“TA 给用户的备注”；控制标记本身不展示。 */
     characterRemarkForUser?: string;
+    /** 角色对「一起听」邀请的回应（控制标记本身不展示）。 */
+    musicInviteResponse?: "accepted" | "declined";
 }
 
 // ── Rich-media patterns (non-global, for single match with index) ──
@@ -285,6 +287,33 @@ const RICH_PATTERNS: {
             content: "他想邀请你见面，是否同意？",
             mediaType: "meeting_invite" as const,
             mediaData: { meetingInviteStatus: "pending" as const },
+        }),
+    },
+    {
+        // 角色主动邀请开启情侣空间。
+        regex: /\[(?:情侣空间邀请|邀请情侣空间|开启情侣空间)\]/,
+        build: () => ({
+            content: "想和你开启情侣空间",
+            mediaType: "couple_invite" as const,
+            mediaData: { coupleInviteStatus: "pending" as const },
+        }),
+    },
+    {
+        // 角色用手机系统打来电话（区别于微信语音/视频通话）。
+        regex: /\[手机来电\]/,
+        build: () => ({
+            content: "手机来电",
+            mediaType: "phone_call" as const,
+            mediaData: { phoneCallStatus: "pending" as const },
+        }),
+    },
+    {
+        // 角色给你发系统短信（独立于微信）。
+        regex: /\[手机短信[：:]\s*([^\]\n]{1,300})\]/,
+        build: (m) => ({
+            content: m[1]?.trim() || "短信",
+            mediaType: "sms_notice" as const,
+            mediaData: { smsBody: m[1]?.trim() || "" },
         }),
     },
     // 群聊带主语宾语的格式（优先匹配）
@@ -680,6 +709,11 @@ export function parseAIResponse(rawText: string, previousState: StateValue[]): P
     const declinedAvatarRecommendation = /[\[【]\s*拒绝头像推荐\s*[\]】]/.test(rawText);
     const characterRemarkMatch = rawText.match(/[\[【]\s*(?:给用户备注|给你备注|用户备注)\s*[：:]\s*([^\]】\n]{1,40})\s*[\]】]/);
     const characterRemarkForUser = characterRemarkMatch?.[1]?.trim();
+    // 一起听邀请的回应标记：[一起听:同意] / [一起听:拒绝]
+    const musicInviteMatch = rawText.match(/[\[【]\s*一起听\s*[:：]\s*([^\]】\n]{0,8})\s*[\]】]/);
+    const musicInviteResponse = musicInviteMatch
+        ? (/^(?:同意|接受|好|可以|行|来吧|走|ok)/i.test(musicInviteMatch[1].trim()) ? "accepted" as const : "declined" as const)
+        : undefined;
     // 0. FIRST: extract ```html blocks and <style>+HTML before any processing
     const htmlBlockPlaceholders: { placeholder: string; original: string }[] = [];
     let protected_ = rawText;
@@ -719,6 +753,7 @@ export function parseAIResponse(rawText: string, previousState: StateValue[]): P
     // 1.5. Strip AI hallucination XML/bracket action shells
     let actionCleaned = stripActionShells(meetingInvite.cleaned)
         .replace(/[\[【]\s*(?:接受|拒绝)头像推荐\s*[\]】]/g, "")
+        .replace(/[\[【]\s*一起听\s*[:：][^\]】\n]*[\]】]/g, "")
         .replace(/[\[【]\s*(?:给用户备注|给你备注|用户备注)\s*[：:]\s*[^\]】\n]{1,40}\s*[\]】]/g, "")
         .trim();
     // 模型只返回控制标记时也保留一条自然可见的答复；否则没有消息落库，
@@ -785,5 +820,6 @@ export function parseAIResponse(rawText: string, previousState: StateValue[]): P
         statusPanel: restore(status.content),
         innerMonologue: restore(mono.content),
         characterRemarkForUser,
+        musicInviteResponse,
     };
 }

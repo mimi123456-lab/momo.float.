@@ -240,21 +240,38 @@ export const PhoneChatApp = memo(function PhoneChatApp({ onClose, initialSession
     const handleSelectContact = (sess: ChatSession | null) => {
         if (sharePayload && sess) {
             if (sharePayload.type === "music") {
-                pushChatMessage({
-                    sessionId: sess.id,
-                    role: "user",
-                    content: sharePayload.together
-                        ? `（戴上耳机，想和你一起听《${sharePayload.title}》— ${sharePayload.artist}）`
-                        : "",
-                    mediaType: "music_share",
-                    mediaData: {
-                        musicTitle: sharePayload.title,
-                        musicArtist: sharePayload.artist,
-                        label: `${sharePayload.title} - ${sharePayload.artist}`,
-                    },
-                });
-                if (sharePayload.together) {
+                if (sharePayload.together && sharePayload.invite) {
+                    pushChatMessage({
+                        sessionId: sess.id,
+                        role: "user",
+                        content: `（邀请你一起听《${sharePayload.title}》— ${sharePayload.artist}。如果想一起听，就在这次回复最后输出 [一起听:同意]；不想听就输出 [一起听:拒绝]，然后用你自己的语气回我。）`,
+                        mediaType: "music_invite",
+                        mediaData: {
+                            musicTitle: sharePayload.title,
+                            musicArtist: sharePayload.artist,
+                            label: `${sharePayload.title} - ${sharePayload.artist}`,
+                            musicInviteStatus: "pending",
+                            musicInviteFrom: "user",
+                        },
+                    });
                     window.dispatchEvent(new CustomEvent(CHAT_REQUEST_REPLY_EVENT, { detail: { sessionId: sess.id } }));
+                } else {
+                    pushChatMessage({
+                        sessionId: sess.id,
+                        role: "user",
+                        content: sharePayload.together
+                            ? `（戴上耳机，想和你一起听《${sharePayload.title}》— ${sharePayload.artist}）`
+                            : "",
+                        mediaType: "music_share",
+                        mediaData: {
+                            musicTitle: sharePayload.title,
+                            musicArtist: sharePayload.artist,
+                            label: `${sharePayload.title} - ${sharePayload.artist}`,
+                        },
+                    });
+                    if (sharePayload.together) {
+                        window.dispatchEvent(new CustomEvent(CHAT_REQUEST_REPLY_EVENT, { detail: { sessionId: sess.id } }));
+                    }
                 }
             } else {
                 const content = formatXiaohongshuShareForPrompt({
