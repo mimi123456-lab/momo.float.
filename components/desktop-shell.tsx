@@ -26,6 +26,7 @@ import { RealityBridgeApp } from "@/components/reality-bridge-app";
 import { REALITY_BRIDGE_APP_EVENT_NAME, REALITY_BRIDGE_DATA_EVENT } from "@/lib/reality-bridge/types";
 import { DiaryApp } from "@/components/diary/diary-app";
 import { XiaohongshuApp } from "@/components/xiaohongshu/xiaohongshu-app";
+import { WatchTogetherApp } from "@/components/watch-together-app";
 import { StoryApp } from "@/components/story/story-app";
 import { VnApp } from "@/components/vn/vn-app";
 import ReadingApp from "@/components/reading/reading-app";
@@ -1086,9 +1087,11 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   const [xiaohongshuBusy, setXiaohongshuBusy] = useState(false);
   const [shoppingMounted, setShoppingMounted] = useState(false);
   const [shoppingBusy, setShoppingBusy] = useState(false);
+  const [watchTogetherMounted, setWatchTogetherMounted] = useState(false);
   if (activeApp === "dwelling" && !dwellingMounted) setDwellingMounted(true);
   if (activeApp === "xiaohongshu" && !xiaohongshuMounted) setXiaohongshuMounted(true);
   if (activeApp === "shopping" && !shoppingMounted) setShoppingMounted(true);
+  if (activeApp === "watchtogether" && !watchTogetherMounted) setWatchTogetherMounted(true);
   const [widgets, setWidgets] = useState<WidgetInstance[]>([]);
   const [incomingCall, setIncomingCall] = useState<{
     sessionId: string; type: "voice" | "video"; charName: string; charAvatar: string | null; isGroup?: boolean;
@@ -4109,6 +4112,10 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
       return null;
     }
 
+    if (activeApp === "watchtogether") {
+      return null;
+    }
+
     if (activeApp === "game") {
       return <GameHubApp onClose={() => setActiveApp(null)} />;
     }
@@ -4760,6 +4767,17 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
                           setShoppingMounted(false);
                         }
                       }}
+                    />
+                  </section>
+                )}
+                {watchTogetherMounted && (
+                  <section className="phone-app-pane" style={activeApp !== "watchtogether" ? { display: "none" } : undefined}>
+                    <WatchTogetherApp
+                      onClose={() => {
+                        setActiveApp(null);
+                        setWatchTogetherMounted(false);
+                      }}
+                      onNotice={setNotice}
                     />
                   </section>
                 )}

@@ -274,6 +274,10 @@ export function MainApp() {
 
     function tryFullscreen() {
       if (!shouldRequestPwaFullscreen()) return;
+      // 一起看打开时不要抢占全屏：文档级全屏会卡住 WebView 的媒体画面，
+      // 播放器自己带原生全屏按钮，用那个即可。
+      const watchApp = document.querySelector<HTMLElement>(".watch-together-app");
+      if (watchApp && watchApp.getClientRects().length > 0) return;
       const doc = document.documentElement;
       if (document.fullscreenElement) return;
       doc.requestFullscreen?.().catch(() => { });

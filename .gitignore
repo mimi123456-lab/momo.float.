@@ -28,3 +28,6 @@ tools/weixin-local-assistant/config.txt
 *.ts.net.crt
 *.ts.net.key
 /public/models/world-builder/
+
+# 一起看：站内视频解析缓存（运行时生成）
+.watch-cache/
