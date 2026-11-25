@@ -23,6 +23,7 @@ import remarkBreaks from "remark-breaks";
 import { createPortal } from "react-dom";
 import { Blocks, Maximize2, ReceiptText } from "lucide-react";
 import { retryChatGeneratedImage } from "@/lib/generated-image-retry";
+import { retryChatGeneratedVideo } from "@/lib/generated-video-retry";
 import { hasCharacterReferenceImage, hasUserReferenceImage } from "@/lib/image-generation-service";
 import { GeneratedImageErrorDialog } from "./generated-image-error-dialog";
 import { ScanPayCard } from "@/components/chat/scan-pay-card";
@@ -2043,6 +2044,8 @@ function MediaFileBubble({
     // 同 ImageBubble：弹窗内校验用 imageRetryError，生成失败走一次性弹窗
     const [imageRetryError, setImageRetryError] = useState("");
     const [imageFailureNotice, setImageFailureNotice] = useState("");
+    const [videoRetrying, setVideoRetrying] = useState(false);
+    const [videoRetryError, setVideoRetryError] = useState("");
 
     useEffect(() => {
         if (!isMediaStoreRef(rawUrl)) {
@@ -2124,6 +2127,16 @@ function MediaFileBubble({
             });
     }, [characterId, imagePromptDraft, imageUseReferenceDraft, imageUseUserReferenceDraft, msg, onUpdate]);
 
+    const handleRetryVideo = useCallback(() => {
+        if (videoRetrying) return;
+        setVideoRetrying(true);
+        setVideoRetryError("");
+        retryChatGeneratedVideo(msg, characterId)
+            .then(updated => { if (updated) onUpdate?.(updated); })
+            .catch(error => setVideoRetryError(error instanceof Error ? error.message : String(error)))
+            .finally(() => setVideoRetrying(false));
+    }, [msg, characterId, onUpdate, videoRetrying]);
+
     const handleSeek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
         e.stopPropagation();
         const audio = audioRef.current;
@@ -2156,6 +2169,41 @@ function MediaFileBubble({
         return (
             <div className="chat-media-file-card chat-media-file-generic">
                 <span className="chat-media-file-title" style={{ opacity: 0.5 }}>加载中...</span>
+            </div>
+        );
+    }
+
+    const videoStatus = msg.mediaData?.videoGenerationStatus;
+    if (fileType === "video" && videoStatus === "pending") {
+        return (
+            <div className="chat-media-file-wrap">
+                <div className="chat-media-file-card chat-media-file-generic" style={{ minWidth: 200 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span className="chat-generated-image-regen-spinner" aria-hidden="true" />
+                        <span className="chat-media-file-title">{msg.mediaData?.videoKind === "loop" ? "动图生成中…" : "视频生成中…"}</span>
+                    </div>
+                    {title && <span className="ts-12" style={{ opacity: 0.6 }}>{title}</span>}
+                </div>
+            </div>
+        );
+    }
+
+    if (fileType === "video" && videoStatus === "failed" && !url) {
+        return (
+            <div className="chat-media-file-wrap">
+                <div className="chat-media-file-card chat-media-file-generic" style={{ minWidth: 200 }}>
+                    <span className="chat-media-file-title">视频生成失败</span>
+                    <span className="ts-12" style={{ opacity: 0.7, whiteSpace: "pre-wrap" }}>
+                        {msg.mediaData?.videoGenerationError || videoRetryError || "未知错误"}
+                    </span>
+                    <button
+                        className="ui-btn ui-btn-outline ui-btn-sm"
+                        onClick={(e) => { e.stopPropagation(); handleRetryVideo(); }}
+                        disabled={videoRetrying}
+                    >
+                        {videoRetrying ? "重试中…" : "重试"}
+                    </button>
+                </div>
             </div>
         );
     }
@@ -2264,13 +2312,25 @@ function MediaFileBubble({
     }
 
     if (fileType === "video" && url) {
+        const isLoop = msg.mediaData?.videoKind === "loop";
         return (
             <div className="chat-media-file-wrap">
-                <div className="chat-media-file-card chat-media-file-video">
-                    {title && <div className="chat-media-file-title">{title}</div>}
-                    <video src={url} controls preload="metadata" onClick={(e) => e.stopPropagation()} />
+                <div className="chat-media-file-card chat-media-file-video" style={{ position: "relative" }}>
+                    {title && !isLoop && <div className="chat-media-file-title">{title}</div>}
+                    {isLoop ? (
+                        <video src={url} autoPlay muted loop playsInline preload="metadata" onClick={(e) => e.stopPropagation()} />
+                    ) : (
+                        <video src={url} controls preload="metadata" onClick={(e) => e.stopPropagation()} />
+                    )}
+                    {isLoop && (
+                        <span style={{
+                            position: "absolute", right: 8, bottom: 8, padding: "2px 8px", borderRadius: 999,
+                            fontSize: 11, lineHeight: "16px", color: "#fff", background: "rgba(0,0,0,0.45)",
+                            pointerEvents: "none",
+                        }}>动图</span>
+                    )}
                 </div>
-                <MediaSaveButton url={url} filename={ensureExtension(title, "video")} />
+                <MediaSaveButton url={url} filename={ensureExtension(title || "video", "video")} />
             </div>
         );
     }

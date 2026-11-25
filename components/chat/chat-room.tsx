@@ -11,7 +11,7 @@ import { translateReasoningText } from "@/lib/reasoning-translate";
 import { withChineseThinkingPrompt } from "@/lib/chinese-thinking-prompt";
 import { MessageBubble, MediaDetailModal, prewarmStickerCache, BilingualTextBlock, isStandaloneHtmlPreviewContent, normalizeTextBubbleContent } from "./message-bubble";
 import { GeneratedImageErrorDialog } from "./generated-image-error-dialog";
-import { PhotoInputModal, TextPhotoModal, VoiceRecordModal, RedPacketModal, LocationInputModal, SystemInstructionModal } from "./rich-input-modals";
+import { PhotoInputModal, TextPhotoModal, VideoInputModal, VoiceRecordModal, RedPacketModal, LocationInputModal, SystemInstructionModal } from "./rich-input-modals";
 import { OocModal } from "./ooc-modal";
 import { EmojiPanel, StickerPanel } from "./emoji-panel";
 import { StickerSearchSuggest } from "./sticker-search-suggest";
@@ -73,11 +73,17 @@ import { loadDeliveredShoppingGifts, type ShoppingGiftCandidate } from "@/lib/sh
 import { settleShoppingPaymentRequest } from "@/lib/shopping-payment-request";
 import type { RegexConfig } from "@/lib/settings-types";
 import { MacroEngine } from "@/lib/macro-engine";
+import { storeMediaBlob } from "@/lib/media-cache-storage";
 import {
     createPendingChatGeneratedImageData,
     generateAndApplyChatGeneratedImage,
     isPendingChatGeneratedImageMessage,
 } from "@/lib/generated-image-retry";
+import {
+    createPendingChatGeneratedVideoData,
+    generateAndApplyChatGeneratedVideo,
+    isPendingChatGeneratedVideoMessage,
+} from "@/lib/generated-video-retry";
 import { scrollElementWithinContainer } from "@/lib/dom-scroll";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
 import { ChatScreenEffectOverlay, type ActiveScreenEffect } from "./chat-screen-effect";
@@ -528,7 +534,7 @@ type PendingMessageJump = {
 };
 
 const TRANSIENT_MESSAGE_PREFIX = "ui-transient-";
-type RichModalKind = "photo" | "text_photo" | "red_packet" | "transfer" | "location" | "transfer_target" | "voice_msg" | "gift" | "system_instruction" | "ooc";
+type RichModalKind = "photo" | "video" | "text_photo" | "red_packet" | "transfer" | "location" | "transfer_target" | "voice_msg" | "gift" | "system_instruction" | "ooc";
 type ChatTextInputHandle = {
     appendText: (text: string, options?: { focus?: boolean }) => void;
     clear: () => void;
@@ -762,6 +768,7 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     const suggestEnabled = !inputLocked && !panelOpen && !suggestClosed && inputText.trim().length > 0;
     const plusMenuItems = [
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" /></svg>, label: "照片墙", onClick: () => onOpenRichModal("photo") },
+        { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="14" height="14" rx="2" /><path d="M22 8l-6 4 6 4V8z" /></svg>, label: "视频", onClick: () => onOpenRichModal("video") },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2" /><line x1="7" y1="8" x2="17" y2="8" /><line x1="7" y1="12" x2="14" y2="12" /><line x1="7" y1="16" x2="11" y2="16" /></svg>, label: "文字图片", onClick: () => onOpenRichModal("text_photo") },
         { icon: <AlertCircle size={22} strokeWidth={1.5} color="var(--c-text)" />, label: "系统指令", onClick: () => onOpenRichModal("system_instruction") },
         { icon: <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--c-text)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 8.6 8.6 0 0 1-3.3-.7L3 21l1.8-5a8.4 8.4 0 1 1 16.2-4.5z" /><text x="12" y="15" textAnchor="middle" fontSize="6.5" fill="var(--c-text)" stroke="none">OOC</text></svg>, label: "OOC 纠偏", onClick: () => onOpenRichModal("ooc") },
@@ -2838,7 +2845,20 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
         draft: AssistantMessageDraft,
         guard?: GenerationRunGuard,
     ): AssistantMessageDraft => {
-        if (draft.mediaType === "tool_notice" || part.mediaType !== "image") return draft;
+        if (draft.mediaType === "tool_notice") return draft;
+
+        if (part.mediaType === "media_file" && part.mediaData?.fileType === "video") {
+            const description = part.mediaData?.label?.trim();
+            if (!description) return draft;
+            throwIfGenerationStopped(guard);
+            return {
+                ...draft,
+                mediaType: "media_file",
+                mediaData: createPendingChatGeneratedVideoData(part.mediaData, description),
+            };
+        }
+
+        if (part.mediaType !== "image") return draft;
 
         const description = part.mediaData?.label?.trim();
         if (!description) return draft;
@@ -2863,6 +2883,24 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
                     console.warn("[ImageGeneration] Failed to generate chat image:", error);
                     const reason = error instanceof Error ? error.message : String(error);
                     setImageGenerationFailure(prev => prev ?? reason);
+                }
+                return null;
+            });
+    };
+
+    const scheduleGeneratedVideoReplacement = (
+        message: ChatMessage,
+        characterId?: string,
+        guard?: GenerationRunGuard,
+    ): Promise<ChatMessage | null> => {
+        if (!isPendingChatGeneratedVideoMessage(message)) return Promise.resolve(null);
+        // 线下模式禁止富媒体，指令不触发视频生成。
+        if (offlineMode) return Promise.resolve(null);
+        return generateAndApplyChatGeneratedVideo(message, characterId || session.contactId, { signal: guard?.signal })
+            .then(updated => updated)
+            .catch(error => {
+                if (!isAbortLikeError(error)) {
+                    console.warn("[VideoGeneration] Failed to generate chat video:", error);
                 }
                 return null;
             });
@@ -3154,7 +3192,9 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
                 draft,
                 afterPublish: isPendingChatGeneratedImageMessage(draft)
                     ? (message) => scheduleGeneratedImageReplacement(message, session.contactId, options)
-                    : afterPublishEffects[idx],
+                    : isPendingChatGeneratedVideoMessage(draft)
+                        ? (message) => scheduleGeneratedVideoReplacement(message, session.contactId, options)
+                        : afterPublishEffects[idx],
             });
         }
 
@@ -7060,6 +7100,28 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
             {richModal === "photo" && (
                 <PhotoInputModal
                     onSend={(desc, imageDataUrl) => { setRichModal(null); sendRichMessage("image", { label: desc }, "", imageDataUrl); }}
+                    onClose={() => setRichModal(null)}
+                />
+            )}
+            {richModal === "video" && (
+                <VideoInputModal
+                    onSend={(payload) => {
+                        setRichModal(null);
+                        void (async () => {
+                            try {
+                                const ref = await storeMediaBlob(payload.file, payload.file.type || "video/mp4", "video");
+                                sendRichMessage("media_file", {
+                                    label: payload.description || "视频",
+                                    fileName: payload.file.name,
+                                    fileType: "video",
+                                    videoDurationSeconds: payload.durationSeconds || undefined,
+                                    videoContactSheetDataUrl: payload.contactSheetDataUrl || undefined,
+                                }, payload.description || "", ref);
+                            } catch (error) {
+                                showChatToast(error instanceof Error ? error.message : "视频保存失败");
+                            }
+                        })();
+                    }}
                     onClose={() => setRichModal(null)}
                 />
             )}

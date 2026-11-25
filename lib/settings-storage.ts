@@ -10,6 +10,8 @@ import type {
     VoiceApiConfig,
     ImageGenerationSettings,
     OpenAiImagePreset,
+    VideoGenerationSettings,
+    VideoPreset,
     BindingConfig,
     BindingSlot,
     CharacterBinding,
@@ -84,6 +86,7 @@ function isUnsupportedWorldBookFormat(obj: Record<string, unknown>): boolean {
 const API_CONFIGS_KEY = "ai_phone_api_configs_v1";
 const VOICE_CONFIGS_KEY = "ai_phone_voice_configs_v1";
 const IMAGE_GENERATION_SETTINGS_KEY = "ai_phone_image_generation_settings_v1";
+const VIDEO_GENERATION_SETTINGS_KEY = "ai_phone_video_generation_settings_v1";
 const BINDINGS_KEY = "ai_phone_bindings_v1";
 const FOLLOW_UP_CONFIG_KEY = "ai_phone_follow_up_config_v1";
 const CHAT_SEND_CONFIG_KEY = "ai_phone_chat_send_config_v1";
@@ -94,6 +97,7 @@ const LEGACY_OVERRIDES_KEY = "ai_phone_char_settings_v1";
 registerKvMigration(API_CONFIGS_KEY);
 registerKvMigration(VOICE_CONFIGS_KEY);
 registerKvMigration(IMAGE_GENERATION_SETTINGS_KEY);
+registerKvMigration(VIDEO_GENERATION_SETTINGS_KEY);
 registerKvMigration(BINDINGS_KEY);
 registerKvMigration(FOLLOW_UP_CONFIG_KEY);
 registerKvMigration(CHAT_SEND_CONFIG_KEY);
@@ -917,6 +921,121 @@ export function saveImageGenerationSettings(settings: ImageGenerationSettings): 
     if (typeof window === "undefined") return;
     kvSet(IMAGE_GENERATION_SETTINGS_KEY, JSON.stringify(normalizeImageGenerationSettings(settings)));
     window.dispatchEvent(new CustomEvent("settings-image-generation-updated"));
+}
+
+// --- Video Generation Settings ──────────────────────────────────────────
+
+export const DEFAULT_VIDEO_PRESET: VideoPreset = {
+    id: "video_preset_default",
+    name: "默认视频方案",
+    apiKey: "",
+    baseUrl: "https://api.openai.com/v1",
+    model: "sora-2",
+    duration: 8,
+    ratio: "16:9",
+    endpointMode: "auto",
+    extraPrompt: "",
+    supportsMotionReference: false,
+    motionReferenceField: "video_url",
+    userReferenceField: "",
+};
+
+export const DEFAULT_VIDEO_GENERATION_SETTINGS: VideoGenerationSettings = {
+    enabled: false,
+    inheritImageApi: false,
+    presets: [DEFAULT_VIDEO_PRESET],
+    activePresetId: DEFAULT_VIDEO_PRESET.id,
+    faceLockRequired: true,
+    includeUserReference: true,
+    maxDailyGenerations: 10,
+    timeoutSeconds: 300,
+};
+
+function normalizeVideoPreset(preset: Partial<VideoPreset> | null | undefined, index: number): VideoPreset {
+    const duration = Math.round(Number(preset?.duration));
+    const ratio = preset?.ratio === "9:16" || preset?.ratio === "1:1" ? preset.ratio : "16:9";
+    return {
+        id: typeof preset?.id === "string" && preset.id.trim() ? preset.id.trim() : `video_preset_${Date.now()}_${index}`,
+        name: typeof preset?.name === "string" && preset.name.trim() ? preset.name.trim() : `视频方案 ${index + 1}`,
+        apiKey: typeof preset?.apiKey === "string" ? preset.apiKey : "",
+        baseUrl: typeof preset?.baseUrl === "string" ? preset.baseUrl : DEFAULT_VIDEO_PRESET.baseUrl,
+        model: typeof preset?.model === "string" ? preset.model : DEFAULT_VIDEO_PRESET.model,
+        duration: Number.isFinite(duration) ? Math.min(13, Math.max(5, duration)) : DEFAULT_VIDEO_PRESET.duration,
+        ratio,
+        endpointMode: preset?.endpointMode === "generations" || preset?.endpointMode === "sora" ? preset.endpointMode : "auto",
+        extraPrompt: typeof preset?.extraPrompt === "string" ? preset.extraPrompt : "",
+        supportsMotionReference: preset?.supportsMotionReference === true,
+        motionReferenceField: typeof preset?.motionReferenceField === "string" && preset.motionReferenceField.trim()
+            ? preset.motionReferenceField.trim()
+            : "video_url",
+        userReferenceField: typeof preset?.userReferenceField === "string" ? preset.userReferenceField.trim() : "",
+    };
+}
+
+function normalizeVideoGenerationSettings(settings: Partial<VideoGenerationSettings> | null | undefined): VideoGenerationSettings {
+    const rawPresets = Array.isArray(settings?.presets) ? settings.presets : [];
+    const presets = (rawPresets.length > 0 ? rawPresets : [DEFAULT_VIDEO_PRESET]).map(normalizeVideoPreset);
+    const activePresetId = presets.some(preset => preset.id === settings?.activePresetId)
+        ? settings!.activePresetId!
+        : presets[0].id;
+    const maxDaily = Math.round(Number(settings?.maxDailyGenerations));
+    const timeout = Math.round(Number(settings?.timeoutSeconds));
+    return {
+        enabled: settings?.enabled === true,
+        inheritImageApi: settings?.inheritImageApi === true,
+        inheritImagePresetId: typeof settings?.inheritImagePresetId === "string" && settings.inheritImagePresetId.trim()
+            ? settings.inheritImagePresetId.trim()
+            : undefined,
+        presets,
+        activePresetId,
+        faceLockRequired: settings?.faceLockRequired !== false,
+        includeUserReference: settings?.includeUserReference !== false,
+        motionReferenceRef: typeof settings?.motionReferenceRef === "string" && settings.motionReferenceRef.trim()
+            ? settings.motionReferenceRef.trim()
+            : undefined,
+        motionReferenceUrl: typeof settings?.motionReferenceUrl === "string" && settings.motionReferenceUrl.trim()
+            ? settings.motionReferenceUrl.trim()
+            : undefined,
+        motionReferenceName: typeof settings?.motionReferenceName === "string" && settings.motionReferenceName.trim()
+            ? settings.motionReferenceName.trim()
+            : undefined,
+        maxDailyGenerations: Number.isFinite(maxDaily) ? Math.min(999, Math.max(0, maxDaily)) : DEFAULT_VIDEO_GENERATION_SETTINGS.maxDailyGenerations,
+        timeoutSeconds: Number.isFinite(timeout) ? Math.min(900, Math.max(60, timeout)) : DEFAULT_VIDEO_GENERATION_SETTINGS.timeoutSeconds,
+    };
+}
+
+export function loadVideoGenerationSettings(): VideoGenerationSettings {
+    if (typeof window === "undefined") return { ...DEFAULT_VIDEO_GENERATION_SETTINGS };
+    try {
+        const raw = kvGet(VIDEO_GENERATION_SETTINGS_KEY);
+        if (!raw) return { ...DEFAULT_VIDEO_GENERATION_SETTINGS };
+        return normalizeVideoGenerationSettings(JSON.parse(raw) as Partial<VideoGenerationSettings>);
+    } catch {
+        return { ...DEFAULT_VIDEO_GENERATION_SETTINGS };
+    }
+}
+
+export function saveVideoGenerationSettings(settings: VideoGenerationSettings): void {
+    if (typeof window === "undefined") return;
+    kvSet(VIDEO_GENERATION_SETTINGS_KEY, JSON.stringify(normalizeVideoGenerationSettings(settings)));
+    window.dispatchEvent(new CustomEvent("settings-video-generation-updated"));
+}
+
+/** 取当前激活的视频方案；开了「复用生图中转站」时用生图预设覆盖地址与 Key。 */
+export function resolveActiveVideoPreset(settings?: VideoGenerationSettings): VideoPreset | null {
+    const stored = settings ?? loadVideoGenerationSettings();
+    const preset = stored.presets.find(item => item.id === stored.activePresetId) || stored.presets[0];
+    if (!preset) return null;
+    if (!stored.inheritImageApi) return preset;
+    const imageSettings = loadImageGenerationSettings();
+    const imagePreset = stored.inheritImagePresetId
+        ? imageSettings.openaiPresets?.find(item => item.id === stored.inheritImagePresetId)
+        : (imageSettings.openaiPresets?.find(item => item.id === imageSettings.activeOpenAiPresetId) || imageSettings.openaiPresets?.[0]);
+    return {
+        ...preset,
+        apiKey: imagePreset?.apiKey ?? imageSettings.apiKey,
+        baseUrl: imagePreset?.baseUrl ?? imageSettings.baseUrl,
+    };
 }
 
 // --- Binding Config ──────────────────────────────────────────

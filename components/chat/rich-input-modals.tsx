@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { buildVideoContactSheet } from "@/lib/video-keyframe-analysis";
 import { CallSttWarningDialog, hideCallSttWarningPermanently, isCallSttWarningHidden } from "./call-stt-warning-dialog";
 import { isAndroidBrowser } from "./voice-input-platform";
 
@@ -72,6 +73,99 @@ export function PhotoInputModal({ onSend, onClose }: PhotoInputModalProps) {
                     <button
                         onClick={() => { if (canSend) onSend(desc.trim(), imageDataUrl!); }}
                         disabled={!canSend}
+                        className="ui-btn ui-btn-success flex-1"
+                    >发送</button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ── Video Input Modal ─────────────────────────────
+
+interface VideoInputModalProps {
+    onSend: (payload: { file: File; description: string; contactSheetDataUrl: string; durationSeconds: number }) => void;
+    onClose: () => void;
+}
+
+export function VideoInputModal({ onSend, onClose }: VideoInputModalProps) {
+    const [file, setFile] = useState<File | null>(null);
+    const [previewUrl, setPreviewUrl] = useState("");
+    const [desc, setDesc] = useState("");
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState("");
+    const [contactSheet, setContactSheet] = useState("");
+    const [duration, setDuration] = useState(0);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
+
+    const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const picked = event.target.files?.[0];
+        event.target.value = "";
+        if (!picked) return;
+        if (picked.size > 60 * 1024 * 1024) {
+            setError("视频超过 60MB，请压缩后再发");
+            return;
+        }
+        setError("");
+        setContactSheet("");
+        setFile(picked);
+        setDuration(0);
+        setPreviewUrl(prev => {
+            if (prev) URL.revokeObjectURL(prev);
+            return URL.createObjectURL(picked);
+        });
+        setBusy(true);
+        try {
+            const result = await buildVideoContactSheet(picked, { frameCount: 4 });
+            setContactSheet(result.dataUrl);
+            setDuration(result.durationSeconds);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "读取视频失败，请换 MP4/H.264 再试");
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div className="modal-overlay" onClick={onClose}>
+            <div onClick={e => e.stopPropagation()} className="modal-dialog">
+                <div className="ts-16 font-semibold text-center text-[var(--c-text)]">发送视频</div>
+                <div
+                    className="w-full rounded-xl flex items-center justify-center ui-placeholder-gradient overflow-hidden cursor-pointer relative"
+                    style={{ minHeight: file ? "auto" : "120px" }}
+                    onClick={() => fileInputRef.current?.click()}
+                >
+                    {previewUrl ? (
+                        <video src={previewUrl} controls preload="metadata" style={{ width: "100%", maxHeight: 240, borderRadius: 12 }} />
+                    ) : (
+                        <div className="flex flex-col items-center gap-2 py-6">
+                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--c-icon)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                <rect x="2" y="5" width="14" height="14" rx="2" />
+                                <path d="M22 8l-6 4 6 4V8z" />
+                            </svg>
+                            <span className="ts-12 text-[var(--c-icon)]">点击上传视频（≤60MB）</span>
+                        </div>
+                    )}
+                    <input ref={fileInputRef} type="file" accept="video/*" className="hidden" onChange={handleFileChange} />
+                </div>
+                {busy && <div className="ts-12 text-center opacity-70">正在抽取关键帧，让他能“看到”视频…</div>}
+                {error && <div className="ts-12 text-center" style={{ color: "var(--c-danger, #e5484d)" }}>{error}</div>}
+                <input
+                    value={desc}
+                    onChange={event => setDesc(event.target.value)}
+                    placeholder="想对他说点什么（可选）"
+                    className="w-full rounded-xl border border-[var(--c-card-border)] bg-transparent p-3 ts-13 text-[var(--c-text)] outline-none"
+                />
+                <div className="flex gap-3 w-full">
+                    <button onClick={onClose} className="ui-btn ui-btn-ghost ui-btn-bordered-ghost flex-1">取消</button>
+                    <button
+                        onClick={() => {
+                            if (!file || busy) return;
+                            onSend({ file, description: desc.trim(), contactSheetDataUrl: contactSheet, durationSeconds: duration });
+                        }}
+                        disabled={!file || busy}
                         className="ui-btn ui-btn-success flex-1"
                     >发送</button>
                 </div>

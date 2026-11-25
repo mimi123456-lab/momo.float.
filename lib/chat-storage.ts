@@ -275,6 +275,15 @@ export type ChatMessage = {
         imageGenerationUsedReference?: boolean;
         imageGenerationStatus?: "pending" | "failed" | "generated";
         imageGenerationError?: string;
+        /** 角色主动发视频/动图：[视频:...] 走 clip，[动图:...] 走 loop。 */
+        videoKind?: "clip" | "loop";
+        videoGenerationStatus?: "pending" | "failed" | "generated";
+        videoGenerationError?: string;
+        videoGenerationMediaRef?: string;
+        videoGenerationPrompt?: string;
+        videoDurationSeconds?: number;
+        /** 用户发来的视频：关键帧拼图（data URL），供视觉模型“看”视频内容。 */
+        videoContactSheetDataUrl?: string;
         mediaCompressedAt?: string;
         mediaCleanedAt?: string;
         readingBookTitle?: string; // 阅读讨论所属书名，用于 prompt 短期记忆边界

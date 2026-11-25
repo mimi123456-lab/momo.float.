@@ -154,7 +154,7 @@ function loadDataUrlImage(dataUrl: string): Promise<HTMLImageElement> {
   });
 }
 
-async function normalizeReferenceImageForEdit(
+export async function normalizeReferenceImageForEdit(
   dataUrl: string,
   crop?: FaceCrop,
 ): Promise<string> {
@@ -184,7 +184,7 @@ async function normalizeReferenceImageForEdit(
   }
 }
 
-async function combineReferenceImagesForEdit(
+export async function combineReferenceImagesForEdit(
   references: Array<{ dataUrl: string; label: string }>,
 ): Promise<string | null> {
   if (references.length === 0) return null;
@@ -231,7 +231,7 @@ async function combineReferenceImagesForEdit(
   }
 }
 
-function resolveGenerationUserIdentityId(characterId?: string, appId?: string): string | null {
+export function resolveGenerationUserIdentityId(characterId?: string, appId?: string): string | null {
   const scopedIdentityId = appId && ["chat", "moments", "group_chat"].includes(appId)
     ? loadChatScope().userIdentityId
     : null;

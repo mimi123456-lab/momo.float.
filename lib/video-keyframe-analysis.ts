@@ -19,7 +19,7 @@ function timeLabel(seconds: number): string {
   return (h ? String(h).padStart(2, "0") + ":" : "") + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
 }
 
-async function extractFrames(file: File, requestedCount: number, signal?: AbortSignal, progress?: VideoFrameProgress): Promise<SampledFrame[]> {
+async function extractFrames(file: File, requestedCount: number, signal?: AbortSignal, progress?: VideoFrameProgress): Promise<{ frames: SampledFrame[]; duration: number }> {
   if (typeof document === "undefined") throw new Error("当前环境不能在本地解码视频。");
   if (signal?.aborted) throw new DOMException("已取消视频分析。", "AbortError");
   const objectUrl = URL.createObjectURL(file);
@@ -66,7 +66,7 @@ async function extractFrames(file: File, requestedCount: number, signal?: AbortS
       const dataUrl = canvas.toDataURL("image/jpeg", 0.72);
       frames.push({ seconds, dataUrl, base64: dataUrl.slice(dataUrl.indexOf(",") + 1) });
     }
-    return frames;
+    return { frames, duration };
   } finally {
     video.removeAttribute("src");
     video.load();
@@ -89,7 +89,7 @@ async function analyzeVideoUsingKeyframesCore(options: {
   const root = (options.baseUrl || (provider === "anthropic" ? "https://api.anthropic.com" : "https://api.openai.com/v1")).trim().replace(/\/+$/, "");
   if (!/^https?:\/\//i.test(root)) throw new Error("API 地址必须以 http:// 或 https:// 开头。");
   options.onProgress?.("正在从本地视频提取关键帧…");
-  const frames = await extractFrames(options.file, options.frameCount, options.signal, options.onProgress);
+  const { frames } = await extractFrames(options.file, options.frameCount, options.signal, options.onProgress);
   options.onProgress?.("已抽取 " + frames.length + " 帧，正在发送给视觉模型…");
   let response: Response;
   let payload: Record<string, unknown> | null;
@@ -281,6 +281,48 @@ export async function analyzeVideoUsingKeyframes(
     });
     throw error;
   }
+}
+
+/**
+ * 把用户上传的视频抽成一张横向关键帧拼图。
+ * 聊天里空间有限，拼成一张图后可以直接走现有的单图视觉链路。
+ */
+export async function buildVideoContactSheet(
+  file: File,
+  options?: { frameCount?: number; signal?: AbortSignal },
+): Promise<{ dataUrl: string; durationSeconds: number }> {
+  if (typeof document === "undefined") throw new Error("当前环境不能处理本地视频");
+  const { frames, duration } = await extractFrames(file, options?.frameCount ?? 4, options?.signal);
+  if (frames.length === 0) throw new Error("没有抽取到视频画面");
+  const images = await Promise.all(frames.map(frame => new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("视频关键帧解码失败"));
+    img.src = frame.dataUrl;
+  })));
+  const cellWidth = 360;
+  const aspect = images[0].height && images[0].width ? images[0].height / images[0].width : 9 / 16;
+  const cellHeight = Math.max(1, Math.round(cellWidth * aspect));
+  const gap = 6;
+  const labelHeight = 22;
+  const canvas = document.createElement("canvas");
+  canvas.width = images.length * cellWidth + (images.length - 1) * gap;
+  canvas.height = cellHeight + labelHeight;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("无法创建视频关键帧画布");
+  context.fillStyle = "#101014";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  images.forEach((img, index) => {
+    const x = index * (cellWidth + gap);
+    context.drawImage(img, x, 0, cellWidth, cellHeight);
+    context.fillStyle = "rgba(0,0,0,0.55)";
+    context.fillRect(x, cellHeight, cellWidth, labelHeight);
+    context.fillStyle = "#fff";
+    context.font = "14px sans-serif";
+    context.textAlign = "center";
+    context.fillText(`${index + 1}/${images.length}  ${timeLabel(frames[index].seconds)}`, x + cellWidth / 2, cellHeight + 16);
+  });
+  return { dataUrl: canvas.toDataURL("image/jpeg", 0.72), durationSeconds: Math.round(duration) };
 }
 
 export async function analyzeCapturedImage(

@@ -202,6 +202,20 @@ const RICH_PATTERNS: {
         },
     },
     {
+        // 角色主动发视频/动图。动图=实况：短秒数、静音循环播放；视频带进度条。
+        regex: new RegExp(`\\[(动图|视频)${C}([^\\]]+)\\]`),
+        build: (m) => ({
+            content: "",
+            mediaType: "media_file" as const,
+            mediaData: {
+                label: m[2].trim(),
+                fileType: "video" as const,
+                videoKind: m[1] === "动图" ? "loop" as const : "clip" as const,
+                videoGenerationStatus: "pending" as const,
+            },
+        }),
+    },
+    {
         regex: new RegExp(`\\[位置${C}([^\\]]+)\\]`),
         build: (m) => ({
             content: "",

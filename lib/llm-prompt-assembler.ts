@@ -187,6 +187,10 @@ function formatImageGenerationDirective(msg: ChatMessage, prefix = ""): string {
 }
 
 function getPromptVisionImageUrl(msg: ChatMessage): string | undefined {
+    // 用户发来的视频：用关键帧拼图让视觉模型“看”视频内容。
+    if (msg.mediaData?.fileType === "video" && msg.mediaData.videoContactSheetDataUrl) {
+        return msg.mediaData.videoContactSheetDataUrl;
+    }
     if (((msg.mediaType === "image") || (msg.mediaType === "media_file" && msg.mediaData?.fileType === "image")) && msg.mediaUrl) {
         return msg.mediaUrl;
     }
@@ -197,8 +201,21 @@ function getPromptVisionImageUrl(msg: ChatMessage): string | undefined {
     return undefined;
 }
 
+function formatVideoHistoryText(msg: ChatMessage, prefix = ""): string {
+    const seconds = msg.mediaData?.videoDurationSeconds;
+    const duration = seconds ? `，约 ${seconds} 秒` : "";
+    const note = msg.role === "user"
+        ? `[用户发来一段视频${duration}，附图是按时间顺序抽取的关键帧拼图]`
+        : `[视频${duration}]`;
+    const text = msg.content?.trim();
+    return `${prefix}${note}${text ? ` ${text}` : ""}`;
+}
+
 function formatDirectVisionBody(msg: ChatMessage, userName: string, charName: string): string {
     if (msg.mediaType === "sticker") return formatRichMediaForHistory(msg, userName, charName);
+    if (msg.mediaType === "media_file" && msg.mediaData?.fileType === "video") {
+        return formatVideoHistoryText(msg);
+    }
     return isImageGenerationMediaMessage(msg)
         ? formatImageGenerationDirective(msg)
         : formatPhotoDirective(msg);
@@ -1190,6 +1207,7 @@ export function formatRichMediaForHistory(msg: ChatMessage, userName: string, ch
         case "image":
             return formatPhotoDirective(msg);
         case "media_file":
+            if (d?.fileType === "video") return formatVideoHistoryText(msg);
             if (d?.fileType === "image" && isImageGenerationMediaMessage(msg)) {
                 return formatImageGenerationDirective(msg);
             }

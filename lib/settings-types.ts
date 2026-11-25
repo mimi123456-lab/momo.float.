@@ -291,6 +291,53 @@ export type ImageGenerationSettings = {
     imageHosting: ImageHostingSettings;
 };
 
+// --- Video Generation ---
+export type VideoGenerationEndpointMode = "auto" | "generations" | "sora";
+export type VideoAspectRatio = "16:9" | "9:16" | "1:1";
+
+export type VideoPreset = {
+    id: string;
+    name: string;
+    apiKey: string;
+    baseUrl: string;
+    model: string;
+    /** 单条视频时长（秒），5~13。 */
+    duration: number;
+    ratio: VideoAspectRatio;
+    /** 提交/轮询端点风格；auto 会依次尝试。 */
+    endpointMode: VideoGenerationEndpointMode;
+    extraPrompt: string;
+    /** 中转站是否支持参考视频（动作迁移）。 */
+    supportsMotionReference: boolean;
+    /** 参考视频字段名，按中转站文档填；留空用 video_url。 */
+    motionReferenceField: string;
+    /** 额外的用户参考图字段名；留空表示不单独发送用户参考图。 */
+    userReferenceField: string;
+};
+
+export type VideoGenerationSettings = {
+    enabled: boolean;
+    /** 直接复用生图页的中转站地址与 Key；模型仍用视频预设里的。 */
+    inheritImageApi: boolean;
+    /** 为空时跟随生图当前激活预设。 */
+    inheritImagePresetId?: string;
+    presets: VideoPreset[];
+    activePresetId: string;
+    /** 锁脸：必须使用角色参考图，缺图直接报错且不发起请求。 */
+    faceLockRequired: boolean;
+    /** 同时附带用户参考图（合照/两人同框时锁用户的脸）。 */
+    includeUserReference: boolean;
+    /** 动作参考视频（media-store:// 引用）。 */
+    motionReferenceRef?: string;
+    /** 或直接填写公开视频链接。 */
+    motionReferenceUrl?: string;
+    motionReferenceName?: string;
+    /** 每天最多生成条数，0 表示不限制。 */
+    maxDailyGenerations: number;
+    /** 单次任务最长等待秒数。 */
+    timeoutSeconds: number;
+};
+
 // --- Configuration Binding System ---
 
 // Content apps that can have per-character bindings.
