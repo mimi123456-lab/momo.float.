@@ -45,6 +45,8 @@ export type VideoGenerationResult = {
     usedCharacterReference: boolean;
     usedUserReference: boolean;
     usedMotionReference: boolean;
+    /** 动作参考因请求体过大被跳过（已改普通生成）。 */
+    motionReferenceSkipped?: boolean;
 };
 
 type VideoApiState =
@@ -324,7 +326,11 @@ async function requestServer(payload: Record<string, unknown>, signal?: AbortSig
     });
     const data = await response.json().catch(() => ({})) as Record<string, unknown>;
     if (!response.ok) {
-        throw new VideoGenerationFailure("FAILED", typeof data.error === "string" ? data.error : `视频接口 HTTP ${response.status}`);
+        const detail = typeof data.error === "string" ? data.error : "";
+        if (response.status === 413) {
+            throw new VideoGenerationFailure("FAILED", "视频接口 HTTP 413（请求体过大：参考图/参考视频超出服务端限制）");
+        }
+        throw new VideoGenerationFailure("FAILED", detail || `视频接口 HTTP ${response.status}`);
     }
     const status = data.status === "succeeded" ? "succeeded" : data.status === "failed" ? "failed" : "pending";
     return {
@@ -397,7 +403,22 @@ export async function generateVideoFromConfiguredApi(params: {
         };
     }
 
-    const submitState = await requestServer(videoApiRequestBody(prepared), params.signal);
+    let submitState: VideoApiState;
+    let motionReferenceSkipped = false;
+    try {
+        submitState = await requestServer(videoApiRequestBody(prepared), params.signal);
+    } catch (error) {
+        // 动作参考视频让请求体超出服务端上限（413）时，去掉参考重试一次，
+        // 至少保证能出片；气泡会注明动作参考没有生效。
+        const tooLarge = error instanceof VideoGenerationFailure && /413|请求体过大/.test(error.message);
+        if (!tooLarge || !prepared.motionReference) throw error;
+        console.warn("[VideoGeneration] 参考视频导致请求体过大，改为不带动作参考重试");
+        submitState = await requestServer(
+            videoApiRequestBody({ ...prepared, motionReference: "", usedMotionReference: false }),
+            params.signal,
+        );
+        motionReferenceSkipped = true;
+    }
     let videoUrl = "";
     if (submitState.status === "succeeded" && submitState.videoUrl) {
         videoUrl = submitState.videoUrl;
@@ -441,5 +462,6 @@ export async function generateVideoFromConfiguredApi(params: {
         usedCharacterReference: Boolean(prepared.characterReferenceDataUrl),
         usedUserReference: prepared.usedUserReference,
         usedMotionReference: prepared.usedMotionReference,
+        motionReferenceSkipped,
     };
 }

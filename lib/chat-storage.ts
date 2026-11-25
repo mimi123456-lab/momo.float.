@@ -282,6 +282,8 @@ export type ChatMessage = {
         videoGenerationMediaRef?: string;
         videoGenerationPrompt?: string;
         videoDurationSeconds?: number;
+        /** 生成附注（如动作参考因体积过大被跳过）。 */
+        videoGenerationNote?: string;
         /** 用户发来的视频：关键帧拼图（data URL），供视觉模型“看”视频内容。 */
         videoContactSheetDataUrl?: string;
         mediaCompressedAt?: string;

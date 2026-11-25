@@ -2330,6 +2330,9 @@ function MediaFileBubble({
                         }}>动图</span>
                     )}
                 </div>
+                {msg.mediaData?.videoGenerationNote && (
+                    <div className="ts-12" style={{ opacity: 0.66, padding: "2px 4px" }}>{msg.mediaData.videoGenerationNote}</div>
+                )}
                 <MediaSaveButton url={url} filename={ensureExtension(title || "video", "video")} />
             </div>
         );

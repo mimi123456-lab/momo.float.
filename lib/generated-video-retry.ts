@@ -89,6 +89,9 @@ export async function generateAndApplyChatGeneratedVideo(
                 videoGenerationPrompt: generated.prompt,
                 videoGenerationStatus: "generated",
                 videoGenerationError: undefined,
+                videoGenerationNote: generated.motionReferenceSkipped
+                    ? "动作参考视频超过服务端体积上限，本次未参考动作"
+                    : undefined,
                 videoDurationSeconds: generated.durationSeconds,
             },
         });
