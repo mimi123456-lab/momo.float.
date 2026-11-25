@@ -52,6 +52,13 @@ type VoiceCallScreenProps = {
     onMinimize?: () => void;
     /** 点击悬浮窗：请求恢复为全屏通话界面 */
     onRestore?: () => void;
+    /** system 模式：系统电话，不写入微信聊天，通话结束后回传台词。 */
+    mode?: "wechat" | "system";
+    onSystemCallEnd?: (payload: {
+        durationSec: number;
+        transcript: Array<{ role: "user" | "assistant"; text: string }>;
+        declined?: boolean;
+    }) => void;
 };
 
 function stripBilingualForSpeech(text: string): string {
@@ -63,7 +70,29 @@ function stripBilingualForSpeech(text: string): string {
 
 // ── Component ───────────────────────────────────────
 
-export function VoiceCallScreen({ session, character, onEnd, onConnect, initiator = "user", minimized = false, onMinimize, onRestore }: VoiceCallScreenProps) {
+export function VoiceCallScreen({ session, character, onEnd, onConnect, initiator = "user", minimized = false, onMinimize, onRestore, mode = "wechat", onSystemCallEnd }: VoiceCallScreenProps) {
+    const systemMode = mode === "system";
+    const transcriptRef = useRef<Array<{ role: "user" | "assistant"; text: string }>>([]);
+    const localSeqRef = useRef(0);
+    const appendMessage = useCallback((role: "user" | "assistant", content: string, extra?: Partial<ChatMessage>): ChatMessage => {
+        if (systemMode) {
+            const next: ChatMessage = {
+                id: `syscall_${Date.now()}_${localSeqRef.current++}`,
+                sessionId: session.id,
+                role,
+                content,
+                status: "sent",
+                createdAt: new Date().toISOString(),
+                ...extra,
+            };
+            messagesRef.current = [...messagesRef.current, next];
+            if (content.trim()) transcriptRef.current.push({ role, text: content });
+            return next;
+        }
+        const next = pushChatMessage({ sessionId: session.id, role, content, ...extra });
+        messagesRef.current = [...messagesRef.current, next];
+        return next;
+    }, [session.id, systemMode]);
     // iOS 保留 Web Speech 免提 + Web Audio 播放（麦克风会话共存的老方案）；
     // 其余设备改「按住说话 + 云端转写」，播放走媒体元素（音量键可控、无静音拨键坑）。
     // 没配 OpenAI 兼容识别时回落旧行为（安卓=文字输入）。
@@ -232,15 +261,17 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
         const lastMsg = messagesRef.current[messagesRef.current.length - 1];
         const initRole = initiator === "character" ? "assistant" : "user";
         if (!lastMsg || !(lastMsg.content.includes("发起了语音通话"))) {
-            const callMsg = initiator === "character"
-                ? `[我向${userNameRef.current}发起了语音通话]`
-                : `[我向${character.name}发起了语音通话]`;
-            const sysMsg = pushChatMessage({
-                sessionId: session.id,
-                role: initRole,
-                content: callMsg,
-            });
-            messagesRef.current = [...messagesRef.current, sysMsg];
+            if (!systemMode) {
+                const callMsg = initiator === "character"
+                    ? `[我向${userNameRef.current}发起了语音通话]`
+                    : `[我向${character.name}发起了语音通话]`;
+                const sysMsg = pushChatMessage({
+                    sessionId: session.id,
+                    role: initRole,
+                    content: callMsg,
+                });
+                messagesRef.current = [...messagesRef.current, sysMsg];
+            }
         }
 
         // User-initiated: auto-connect after 3s fake dial
@@ -307,23 +338,16 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
 
         // Save messages to storage
         if (chatParts.length === 0 && (statusPanel || innerMonologue)) {
-            const aiMsg = pushChatMessage({
-                sessionId: session.id,
-                role: "assistant",
-                content: "",
+            appendMessage("assistant", "", {
                 statusPanel,
                 statusRegionMode,
                 innerMonologue,
                 stateValues: stateValues.length > 0 ? stateValues : undefined,
                 freshStateValues,
             });
-            messagesRef.current = [...messagesRef.current, aiMsg];
         } else {
-            const newMsgs = chatParts.map((part, idx) =>
-                pushChatMessage({
-                    sessionId: session.id,
-                    role: "assistant",
-                    content: part.content,
+            chatParts.forEach((part, idx) => {
+                appendMessage("assistant", part.content, {
                     mediaType: part.mediaType,
                     mediaData: part.mediaData,
                     statusPanel: idx === 0 && statusPanel ? statusPanel : undefined,
@@ -331,9 +355,8 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                     innerMonologue: idx === 0 && innerMonologue ? innerMonologue : undefined,
                     stateValues: idx === 0 && stateValues.length > 0 ? stateValues : undefined,
                     freshStateValues: idx === 0 ? freshStateValues : undefined,
-                })
-            );
-            messagesRef.current = [...messagesRef.current, ...newMsgs];
+                });
+            });
         }
 
         // Return clean text parts for TTS (exclude rich media content)
@@ -349,12 +372,7 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
     const runConversationTurn = useCallback(async (userText?: string) => {
         // 1. Save user message (skip for initial greeting)
         if (userText) {
-            const userMsg = pushChatMessage({
-                sessionId: session.id,
-                role: "user",
-                content: userText,
-            });
-            messagesRef.current = [...messagesRef.current, userMsg];
+            const userMsg = appendMessage("user", userText);
 
             // Add user subtitle
             setSubtitles(prev => [...prev, { id: userMsg.id, role: "user", text: userText }]);
@@ -620,17 +638,21 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             window.speechSynthesis.cancel();
         }
 
-        const endMsg = pushChatMessage({
-            sessionId: session.id,
-            role: "user",
-            content: `[我挂断了语音通话]`,
-            mediaData: { callDuration: formatTime(callDuration) },
-        });
-        messagesRef.current = [...messagesRef.current, endMsg];
+        if (systemMode) {
+            onSystemCallEnd?.({ durationSec: callDuration, transcript: transcriptRef.current });
+        } else {
+            const endMsg = pushChatMessage({
+                sessionId: session.id,
+                role: "user",
+                content: `[我挂断了语音通话]`,
+                mediaData: { callDuration: formatTime(callDuration) },
+            });
+            messagesRef.current = [...messagesRef.current, endMsg];
+        }
 
         // Delay then close
         setTimeout(() => onEnd(), 1500);
-    }, [session.id, callDuration, onEnd]);
+    }, [callDuration, onEnd, onSystemCallEnd, session.id, systemMode]);
 
     // ── Render ──────────────────────────────────────
 
@@ -953,11 +975,15 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
                         <>
                             <button
                                 onClick={() => {
-                                    pushChatMessage({
-                                        sessionId: session.id,
-                                        role: "user",
-                                        content: `[我拒绝了语音通话]`,
-                                    });
+                                    if (systemMode) {
+                                        onSystemCallEnd?.({ durationSec: 0, transcript: [], declined: true });
+                                    } else {
+                                        pushChatMessage({
+                                            sessionId: session.id,
+                                            role: "user",
+                                            content: `[我拒绝了语音通话]`,
+                                        });
+                                    }
                                     onEnd();
                                 }}
                                 className="ui-call-btn ui-call-btn-danger"

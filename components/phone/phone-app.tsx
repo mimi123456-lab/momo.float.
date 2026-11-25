@@ -23,11 +23,10 @@ import {
     clearPhoneCallLogs,
     loadPhoneCallLogs,
     resolvePhoneNumber,
-    updatePhoneCallLog,
     type PhoneCallLog,
 } from "@/lib/phone-call-storage";
-import { generateCallLines } from "@/lib/phone-call-engine";
-import { createOrGetSession, pushChatMessage } from "@/lib/chat-storage";
+import { createOrGetSession, pushChatMessage, type ChatSession } from "@/lib/chat-storage";
+import { VoiceCallScreen } from "@/components/chat/voice-call-screen";
 
 type PhoneTab = "favorites" | "recents" | "contacts" | "keypad" | "voicemail";
 
@@ -72,6 +71,12 @@ export function PhoneApp({ onClose, onNotice }: { onClose: () => void; onNotice?
     const [dialed, setDialed] = useState("");
     const [search, setSearch] = useState("");
     const [call, setCall] = useState<CallState | null>(null);
+    const [voiceCall, setVoiceCall] = useState<{
+        character: Character;
+        session: ChatSession;
+        initiator: "user" | "character";
+        direction: "outgoing" | "incoming";
+    } | null>(null);
     const [favorites, setFavorites] = useState<string[]>(() => {
         try { return JSON.parse(localStorage.getItem("phone-favorite-contacts") || "[]"); } catch { return []; }
     });
@@ -99,43 +104,40 @@ export function PhoneApp({ onClose, onNotice }: { onClose: () => void; onNotice?
     // 通话计时
     const callRef = useRef<CallState | null>(null);
     callRef.current = call;
-    useEffect(() => {
-        if (!call || call.phase === "incoming") return;
-        if (call.phase === "calling") {
-            const timer = window.setTimeout(() => {
-                setCall(prev => prev && prev.phase === "calling" ? { ...prev, phase: "active" } : prev);
-            }, 2200);
-            return () => window.clearTimeout(timer);
-        }
-        const timer = window.setInterval(() => {
-            setCall(prev => prev && prev.phase === "active" ? { ...prev, seconds: prev.seconds + 1 } : prev);
-        }, 1000);
-        return () => window.clearInterval(timer);
-    }, [call?.phase, call?.character.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const numberFor = useCallback((character: Character) => resolvePhoneNumber(character.id, character.wechatID), []);
 
-    const finishAnsweredCall = useCallback(async (state: CallState, logId: string) => {
-        const duration = formatDuration(state.seconds);
-        let lines: string[] = [];
+    const finishSystemCall = useCallback((state: { character: Character; session: ChatSession; direction: "outgoing" | "incoming" }, payload: {
+        durationSec: number;
+        transcript: Array<{ role: "user" | "assistant"; text: string }>;
+        declined?: boolean;
+    }) => {
+        const lines = payload.transcript.map(item => `${item.role === "user" ? "你" : state.character.name}：${item.text}`);
+        addPhoneCallLog({
+            characterId: state.character.id,
+            characterName: state.character.name,
+            number: numberFor(state.character),
+            type: state.direction === "incoming" ? "incoming" : "outgoing",
+            durationSec: payload.durationSec,
+            transcript: payload.transcript.filter(item => item.role === "assistant").map(item => item.text),
+        });
+        setLogs(loadPhoneCallLogs());
         try {
-            lines = await generateCallLines({
-                characterName: state.character.name,
-                persona: state.character.persona || state.character.personality || "",
-                durationSec: state.seconds,
-                direction: state.direction,
-            });
-        } catch { /* 生成失败时只同步通话记录 */ }
-        if (lines.length > 0) updatePhoneCallLog(logId, { transcript: lines });
-        try {
-            const session = createOrGetSession(state.character.id);
-            const content = lines.length > 0
-                ? `〔手机通话结束 · ${duration}〕电话里${state.character.name}说：\n${lines.map(line => `「${line}」`).join("\n")}`
-                : `〔手机通话结束〕和${state.character.name}通话 ${duration}`;
-            pushChatMessage({ sessionId: session.id, role: "system", content, mediaType: "tool_notice" });
-            window.dispatchEvent(new CustomEvent("ai-chat-request-reply", { detail: { sessionId: session.id } }));
+            const content = `〔系统电话 · ${formatDuration(payload.durationSec)}〕\n${lines.join("\n") || "（没有通话内容）"}`;
+            pushChatMessage({ sessionId: state.session.id, role: "system", content, mediaType: "tool_notice" });
         } catch { /* 会话不可用时不阻塞 */ }
-    }, []);
+        setVoiceCall(null);
+    }, [numberFor]);
+
+    const mountVoiceCall = useCallback((character: Character, direction: "outgoing" | "incoming") => {
+        try {
+            const session = createOrGetSession(character.id);
+            setVoiceCall({ character, session, initiator: "user", direction });
+        } catch {
+            onNotice?.("无法建立通话，请先打开和 TA 的聊天");
+        }
+        setCall(null);
+    }, [onNotice]);
 
     const startCall = useCallback((character: Character) => {
         setCall({ character, direction: "outgoing", phase: "calling", seconds: 0 });
@@ -145,22 +147,33 @@ export function PhoneApp({ onClose, onNotice }: { onClose: () => void; onNotice?
     const hangUp = useCallback(() => {
         const state = callRef.current;
         if (!state) return;
-        const answered = state.phase === "active";
-        const log = addPhoneCallLog({
+        addPhoneCallLog({
             characterId: state.character.id,
             characterName: state.character.name,
             number: numberFor(state.character),
-            type: answered ? (state.direction === "incoming" ? "incoming" : "outgoing") : "missed",
-            durationSec: state.seconds,
+            type: "missed",
+            durationSec: 0,
         });
         setLogs(loadPhoneCallLogs());
         setCall(null);
-        if (answered) void finishAnsweredCall(state, log.id);
-    }, [finishAnsweredCall, numberFor]);
+    }, [numberFor]);
 
     const answerCall = useCallback(() => {
-        setCall(prev => prev ? { ...prev, phase: "active" } : prev);
-    }, []);
+        const state = callRef.current;
+        if (!state) return;
+        mountVoiceCall(state.character, state.direction);
+    }, [mountVoiceCall]);
+
+    // 拨出后响铃 2.2 秒，接通进入真实语音通话
+    useEffect(() => {
+        if (!call || call.phase !== "calling") return;
+        const timer = window.setTimeout(() => {
+            if (callRef.current?.phase === "calling") {
+                mountVoiceCall(callRef.current.character, "outgoing");
+            }
+        }, 2200);
+        return () => window.clearTimeout(timer);
+    }, [call, mountVoiceCall]);
 
     const declineCall = useCallback(() => {
         const state = callRef.current;
@@ -229,6 +242,11 @@ export function PhoneApp({ onClose, onNotice }: { onClose: () => void; onNotice?
                                 <div style={{ fontSize: 12, color: "var(--c-text-secondary, #8a8a8a)", marginTop: 2 }}>
                                     {log.type === "missed" ? "未接来电" : log.durationSec > 0 ? `通话 ${formatDuration(log.durationSec)}` : "已呼出"} · {formatWhen(log.startedAt)}
                                 </div>
+                                {log.transcript && log.transcript.length > 0 && (
+                                    <div style={{ fontSize: 11.5, color: "var(--c-text-secondary, #8a8a8a)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                        {log.transcript[0]}
+                                    </div>
+                                )}
                             </div>
                             <button type="button" aria-label="回拨" onClick={() => { const character = characters.find(item => item.id === log.characterId); if (character) startCall(character); }} style={iconButtonStyle}>
                                 <Phone size={18} />
@@ -365,6 +383,16 @@ export function PhoneApp({ onClose, onNotice }: { onClose: () => void; onNotice?
             </nav>
 
             {call && <CallOverlay state={call} onHangup={hangUp} onAnswer={answerCall} onDecline={declineCall} />}
+            {voiceCall && (
+                <VoiceCallScreen
+                    session={voiceCall.session}
+                    character={voiceCall.character}
+                    mode="system"
+                    initiator={voiceCall.initiator}
+                    onEnd={() => setVoiceCall(null)}
+                    onSystemCallEnd={(payload) => finishSystemCall(voiceCall, payload)}
+                />
+            )}
         </div>
     );
 }
