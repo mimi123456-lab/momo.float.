@@ -29,6 +29,7 @@ import remarkGfm from "remark-gfm";
 import { createPortal } from "react-dom";
 
 import { CHARACTERS_UPDATED_EVENT, loadCharacters } from "@/lib/character-storage";
+import { runSummarizationPipeline } from "@/lib/memory-summarizer";
 import { Character } from "@/lib/character-types";
 import { loadCustomAppChatPlusActions, type RegisteredCustomAppChatPlusAction } from "@/lib/custom-app-chat-directives";
 import { CUSTOM_APPS_UPDATED_EVENT, getInstalledCustomApp } from "@/lib/custom-app-storage";
@@ -4492,11 +4493,14 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
         setActiveOfflineTarget(null);
         setOfflineTurns(loadChatOfflineTurns(session.id));
         setOfflineVisibleCount(OFFLINE_INITIAL_LOAD);
-        setOfflineMode(prev => {
-            const next = !prev;
-            kvSet(CHAT_OFFLINE_MODE_PREFIX + session.id, next ? "1" : "0");
-            return next;
-        });
+        const nextOffline = !offlineMode;
+        setOfflineMode(nextOffline);
+        kvSet(CHAT_OFFLINE_MODE_PREFIX + session.id, nextOffline ? "1" : "0");
+        if (!nextOffline) {
+            // 退出线下：把这段线下见面写入该角色的长期记忆，线上从此「知道」发生过什么。
+            const character = loadCharacters().find(item => item.id === session.contactId);
+            if (character) void runSummarizationPipeline(character.id, character.name).catch(() => undefined);
+        }
     };
 
     const toggleTheaterMode = () => {

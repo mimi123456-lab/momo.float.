@@ -49,11 +49,12 @@ export type StoryGlobalSettings = {
 };
 
 export const STORY_GLOBAL_SETTINGS_EVENT = "story-global-settings-updated";
-const STORY_GLOBAL_SETTINGS_KEY = "ai_phone_story_global_settings_v1";
+// v2：默认开启「剧情页打开期间中止线上主动消息」——剧情进行时不应再收到线上打扰。
+const STORY_GLOBAL_SETTINGS_KEY = "ai_phone_story_global_settings_v2";
 registerKvMigration(STORY_GLOBAL_SETTINGS_KEY);
 
 const DEFAULT_STORY_GLOBAL_SETTINGS: StoryGlobalSettings = {
-  interruptProactiveDuringStory: false,
+  interruptProactiveDuringStory: true,
   streamingEnabled: false,
   timeAware: true,
 };
@@ -62,7 +63,7 @@ export function loadStoryGlobalSettings(): StoryGlobalSettings {
   try {
     const parsed = JSON.parse(kvGet(STORY_GLOBAL_SETTINGS_KEY) || "{}") as Partial<StoryGlobalSettings>;
     return {
-      interruptProactiveDuringStory: parsed.interruptProactiveDuringStory === true,
+      interruptProactiveDuringStory: parsed.interruptProactiveDuringStory !== false,
       streamingEnabled: parsed.streamingEnabled === true,
       timeAware: parsed.timeAware !== false,
     };
@@ -73,7 +74,7 @@ export function loadStoryGlobalSettings(): StoryGlobalSettings {
 
 export function saveStoryGlobalSettings(settings: StoryGlobalSettings): void {
   const normalized: StoryGlobalSettings = {
-    interruptProactiveDuringStory: settings.interruptProactiveDuringStory === true,
+    interruptProactiveDuringStory: settings.interruptProactiveDuringStory !== false,
     streamingEnabled: settings.streamingEnabled === true,
     timeAware: settings.timeAware !== false,
   };

@@ -56,7 +56,7 @@ import { Avatar } from "@/components/ui/primitives";
 import { StoryHtmlRenderer, type StoryVoiceSegment } from "@/components/ui/story-html-renderer";
 import { StorySettingsPage, STORY_DEFAULT_STATUS_RENDER, STORY_DEFAULT_THEATER_RENDER } from "@/components/story/story-settings-page";
 import { loadCharacters } from "@/lib/character-storage";
-import { maybeRunSummarization } from "@/lib/memory-summarizer";
+import { maybeRunSummarization, runSummarizationPipeline } from "@/lib/memory-summarizer";
 import { incrementEventCounter } from "@/lib/memory-storage";
 import { loadBindingConfig, loadPresets, resolveBinding, resolveUserIdentity } from "@/lib/settings-storage";
 import {
@@ -1489,6 +1489,22 @@ export function StoryApp({ onClose }: StoryAppProps) {
     alert(`已合并 ${result.mergedSessionIds.length} 条分线、${result.copiedMessageCount} 条剧情消息${deleteSources ? "，原分线已删除" : ""}${result.skippedSessionIds.length ? `；跳过 ${result.skippedSessionIds.length} 条不可合并的剧情` : ""}。`);
   }
 
+  // 结束当前剧情：标记结束 + 把这段剧情并入角色长期记忆 + 返回剧情主页（不自动进入下一个剧情）。
+  async function handleEndStoryAndReturnHome() {
+    if (!currentSession || !activeCharacterId) return;
+    const now = new Date().toISOString();
+    updateStorySession(currentSession.id, { endedAt: now, includedInMemoryAt: now });
+    setQuickStoryOpen(false);
+    setSettingsOpen(true);
+    try {
+      incrementEventCounter(activeCharacterId);
+      await runSummarizationPipeline(activeCharacterId, storyDisplayName);
+    } catch {
+      /* 记忆总结失败（未配置总结 API 等）不阻塞返回主页 */
+    }
+    setStorageVersion((value) => value + 1);
+  }
+
   function handleQuickStoryCreate() {
     if (!activeOwnerId || !activeCharacterId) return;
     const now = new Date();
@@ -2866,13 +2882,17 @@ export function StoryApp({ onClose }: StoryAppProps) {
         }}>
           <section className="story-dialog story-quick-story-dialog" role="dialog" aria-modal="true" aria-label="快捷进入新剧情">
             <header><strong>快捷进入新剧情</strong><button type="button" onClick={() => setQuickStoryOpen(false)}><XMarkIcon width={16} /></button></header>
-            <p className="story-quick-story-question">是否结束当前剧情，快捷进入新剧情？</p>
-            <p className="story-settings-note">新分线会按当前时间自动命名，之后可在剧情目录中修改。</p>
+            <p className="story-quick-story-question">结束当前剧情？</p>
+            <p className="story-settings-note">「结束剧情」会把这段剧情写入角色长期记忆并回到剧情主页；只有选「结束并新建」才会立刻进入下一段剧情。</p>
             <label className="story-settings-toggle-row">
               <span><strong>独立剧情分线</strong></span>
               <input type="checkbox" checked={quickStoryIndependent} onChange={(event) => setQuickStoryIndependent(event.target.checked)} />
             </label>
-            <footer><button type="button" onClick={() => setQuickStoryOpen(false)}>取消</button><button type="button" className="story-settings-primary" onClick={handleQuickStoryCreate}>结束并新建</button></footer>
+            <footer>
+              <button type="button" onClick={() => setQuickStoryOpen(false)}>取消</button>
+              <button type="button" onClick={() => void handleEndStoryAndReturnHome()}>结束剧情，返回主页</button>
+              <button type="button" className="story-settings-primary" onClick={handleQuickStoryCreate}>结束并新建</button>
+            </footer>
           </section>
         </div>
       ) : null}
