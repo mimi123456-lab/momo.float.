@@ -194,7 +194,8 @@ async function prepareRequest(
         ? (preset.supportsMotionReference ? await loadMotionReferenceRef(motionReferenceOverride) : "")
         : await resolveMotionReference(settings, preset);
 
-    const attachUserToFrame = usedUserReference && /合照|同框|一起|两人|我们|咱们/.test(description);
+    const attachUserToFrame = usedUserReference
+        && (preset.imageField !== "image" || /合照|同框|一起|两人|我们|咱们/.test(description));
     const firstFrame = attachUserToFrame
         ? await combineReferenceImagesForEdit([
             { dataUrl: characterReferenceDataUrl, label: "角色参考（左）" },
@@ -216,7 +217,10 @@ async function prepareRequest(
         motionReference
             ? "【动作参考】动作节奏与手势参考提供的视频，但人物长相必须以参考图为准。"
             : "",
-        `【画面要求】单镜头、固定机位、人物半身或全身入镜、手部动作清晰，时长约 ${preset.duration} 秒，不要字幕、不要水印、不要多镜头切换。`,
+        `【画面要求】单镜头、固定机位、人物半身或全身入镜、手部动作清晰，时长约 ${preset.duration} 秒；不要字幕、不要水印、不要台标、不要账号名或贴纸文字、不要多镜头切换。`,
+        preset.keepBackgroundSharp
+            ? "【背景要求】背景保持清晰、真实、有层次，不要虚化、不要大光圈散景、不要人像景深效果。"
+            : "",
     ].filter(Boolean).join("\n\n");
 
     return {
@@ -229,6 +233,39 @@ async function prepareRequest(
         usedUserReference,
         usedMotionReference: Boolean(motionReference),
     };
+}
+
+function parseExtraParams(text: string): Record<string, unknown> | undefined {
+    const raw = text.trim();
+    if (!raw) return undefined;
+    try {
+        const parsed = JSON.parse(raw) as unknown;
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            return parsed as Record<string, unknown>;
+        }
+    } catch {
+        // 非法 JSON 交给设置页提示，这里忽略，避免阻断生成。
+    }
+    return undefined;
+}
+
+/** 按模型名给出参数默认值，减少手填；未知模型保持通用 New API 风格。 */
+export function inferVideoPresetDefaults(model: string): Partial<VideoPreset> {
+    const name = model.toLowerCase();
+    if (name.includes("sora")) {
+        // Sora 走 /videos，首帧字段是 input_reference，不支持动作参考视频，也不接受 resolution。
+        return { endpointMode: "sora", fps: 30, imageField: "input_reference", resolution: "720p" };
+    }
+    if (name.includes("veo")) {
+        return { endpointMode: "generations", fps: 24, imageField: "image" };
+    }
+    if (name.includes("kling")) {
+        return { endpointMode: "generations", fps: 24, imageField: "image" };
+    }
+    if (/seedance|doubao|jimeng|hailuo|pixverse|runway|vidu|wan|minimax/.test(name)) {
+        return { endpointMode: "generations", fps: 24, imageField: "image" };
+    }
+    return { endpointMode: "auto", fps: 24, imageField: "image" };
 }
 
 function videoApiRequestBody(prepared: PreparedRequest) {
@@ -248,6 +285,9 @@ function videoApiRequestBody(prepared: PreparedRequest) {
         duration: preset.duration,
         ratio: preset.ratio,
         resolution: preset.resolution,
+        fps: preset.fps,
+        imageField: preset.imageField || "image",
+        extraBody: parseExtraParams(preset.extraParams),
         endpointMode: preset.endpointMode,
     };
 }

@@ -306,6 +306,14 @@ export type VideoPreset = {
     ratio: VideoAspectRatio;
     /** 视频分辨率，New API 系中转站必填（如 480p / 720p / 1080p）。 */
     resolution: string;
+    /** 帧率；不同模型默认值不同，可按模型自动配置。 */
+    fps: number;
+    /** 首帧参考图字段名：多数为 image，Sora 为 input_reference。 */
+    imageField: string;
+    /** 高级请求参数（JSON），会合并进请求体，用于兼容特殊中转站。 */
+    extraParams: string;
+    /** 背景保持清晰，不虚化、不散景（部分模型默认开人像虚化）。 */
+    keepBackgroundSharp: boolean;
     /** 提交/轮询端点风格；auto 会依次尝试。 */
     endpointMode: VideoGenerationEndpointMode;
     extraPrompt: string;

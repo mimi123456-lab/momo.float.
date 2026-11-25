@@ -19,7 +19,13 @@ function timeLabel(seconds: number): string {
   return (h ? String(h).padStart(2, "0") + ":" : "") + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
 }
 
-async function extractFrames(file: File, requestedCount: number, signal?: AbortSignal, progress?: VideoFrameProgress): Promise<{ frames: SampledFrame[]; duration: number }> {
+async function extractFrames(
+  file: File,
+  requestedCount: number,
+  signal?: AbortSignal,
+  progress?: VideoFrameProgress,
+  mode: "uniform" | "adaptive" = "uniform",
+): Promise<{ frames: SampledFrame[]; duration: number }> {
   if (typeof document === "undefined") throw new Error("当前环境不能在本地解码视频。");
   if (signal?.aborted) throw new DOMException("已取消视频分析。", "AbortError");
   const objectUrl = URL.createObjectURL(file);
@@ -45,26 +51,81 @@ async function extractFrames(file: File, requestedCount: number, signal?: AbortS
     await waitFor("loadedmetadata");
     const duration = Number(video.duration);
     if (!Number.isFinite(duration) || duration <= 0) throw new Error("读取不到视频时长，无法抽取关键帧。");
-    const count = Math.min(24, Math.max(4, Math.floor(requestedCount || 12)));
     const width = video.videoWidth || 960;
     const height = video.videoHeight || 540;
     const scale = Math.min(1, 960 / Math.max(width, height));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(width * scale));
     canvas.height = Math.max(1, Math.round(height * scale));
+    // requestedCount 为 0 表示按视频时长自动决定：约每 1.5 秒一帧，4~12 帧。
+    const autoCount = Math.min(12, Math.max(4, Math.round(duration / 1.5)));
+    const count = Math.min(24, Math.max(4, Math.floor(requestedCount || autoCount)));
     const context = canvas.getContext("2d", { alpha: false });
     if (!context) throw new Error("无法初始化视频关键帧画布。");
     const frames: SampledFrame[] = [];
-    for (let i = 0; i < count; i++) {
+    const uniformTimes = () => Array.from({ length: count }, (_, i) => (
+      Math.min(Math.max(0, duration - 0.08), duration * ((i + 0.5) / count))
+    ));
+    const seekTo = async (seconds: number) => {
       if (signal?.aborted) throw new DOMException("已取消视频分析。", "AbortError");
-      const seconds = Math.min(Math.max(0, duration - 0.08), duration * ((i + 0.5) / count));
-      progress?.("正在本地抽取关键帧 " + (i + 1) + "/" + count + "…");
       const seeked = waitFor("seeked");
       video.currentTime = seconds;
       await seeked;
+    };
+
+    // 自适应模式：先低成本探测画面变化，把帧优先给动作幅度大的时刻，
+    // 再补齐到目标帧数，避免固定均匀抽帧漏掉中间动作（如连续手势舞）。
+    const selectAdaptiveTimes = async (): Promise<number[]> => {
+      const probe = document.createElement("canvas");
+      probe.width = 40;
+      probe.height = 40;
+      const probeContext = probe.getContext("2d", { alpha: false });
+      if (!probeContext) return uniformTimes();
+      const candidateCount = Math.min(30, Math.max(count * 2, Math.round(duration)));
+      const scored: { seconds: number; diff: number }[] = [];
+      let previous: Uint8ClampedArray | null = null;
+      for (let i = 0; i < candidateCount; i++) {
+        const seconds = Math.min(Math.max(0, duration - 0.08), duration * ((i + 0.5) / candidateCount));
+        progress?.("正在分析动作变化 " + (i + 1) + "/" + candidateCount + "…");
+        await seekTo(seconds);
+        probeContext.drawImage(video, 0, 0, probe.width, probe.height);
+        const data = probeContext.getImageData(0, 0, probe.width, probe.height).data;
+        let diff = 0;
+        if (previous) {
+          for (let p = 0; p < data.length; p += 4) {
+            diff += Math.abs(data[p] - previous[p])
+              + Math.abs(data[p + 1] - previous[p + 1])
+              + Math.abs(data[p + 2] - previous[p + 2]);
+          }
+        }
+        scored.push({ seconds, diff });
+        previous = data;
+      }
+      const chosen: { seconds: number; diff: number }[] = [scored[0]];
+      const minGap = duration / (count * 1.4);
+      const byDiff = scored.slice(1).sort((a, b) => b.diff - a.diff);
+      for (const item of byDiff) {
+        if (chosen.length >= count) break;
+        if (chosen.every(picked => Math.abs(picked.seconds - item.seconds) >= minGap)) chosen.push(item);
+      }
+      if (chosen.length < count) {
+        for (const seconds of uniformTimes()) {
+          if (chosen.length >= count) break;
+          if (chosen.every(picked => Math.abs(picked.seconds - seconds) >= minGap / 2)) {
+            chosen.push({ seconds, diff: 0 });
+          }
+        }
+      }
+      return chosen.sort((a, b) => a.seconds - b.seconds).map(item => item.seconds);
+    };
+
+    const times = mode === "adaptive" ? await selectAdaptiveTimes() : uniformTimes();
+    for (let i = 0; i < times.length; i++) {
+      progress?.("正在本地抽取关键帧 " + (i + 1) + "/" + times.length + "…");
+      await seekTo(times[i]);
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       const dataUrl = canvas.toDataURL("image/jpeg", 0.72);
-      frames.push({ seconds, dataUrl, base64: dataUrl.slice(dataUrl.indexOf(",") + 1) });
+      frames.push({ seconds: times[i], dataUrl, base64: dataUrl.slice(dataUrl.indexOf(",") + 1) });
     }
     return { frames, duration };
   } finally {
@@ -289,10 +350,11 @@ export async function analyzeVideoUsingKeyframes(
  */
 export async function buildVideoContactSheet(
   file: File,
-  options?: { frameCount?: number; signal?: AbortSignal },
+  options?: { frameCount?: number; signal?: AbortSignal; onProgress?: VideoFrameProgress },
 ): Promise<{ dataUrl: string; durationSeconds: number }> {
   if (typeof document === "undefined") throw new Error("当前环境不能处理本地视频");
-  const { frames, duration } = await extractFrames(file, options?.frameCount ?? 4, options?.signal);
+  // frameCount 不传时按视频时长和动作变化自动抽取（4~12 帧）。
+  const { frames, duration } = await extractFrames(file, options?.frameCount ?? 0, options?.signal, options?.onProgress, "adaptive");
   if (frames.length === 0) throw new Error("没有抽取到视频画面");
   const images = await Promise.all(frames.map(frame => new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
@@ -300,27 +362,33 @@ export async function buildVideoContactSheet(
     img.onerror = () => reject(new Error("视频关键帧解码失败"));
     img.src = frame.dataUrl;
   })));
-  const cellWidth = 360;
+  const cellWidth = 320;
   const aspect = images[0].height && images[0].width ? images[0].height / images[0].width : 9 / 16;
   const cellHeight = Math.max(1, Math.round(cellWidth * aspect));
   const gap = 6;
   const labelHeight = 22;
+  // 多帧时排成网格（最多 4 列），单行拼图在 12 帧时会被模型缩放到看不清。
+  const columns = Math.min(4, images.length);
+  const rows = Math.ceil(images.length / columns);
   const canvas = document.createElement("canvas");
-  canvas.width = images.length * cellWidth + (images.length - 1) * gap;
-  canvas.height = cellHeight + labelHeight;
+  canvas.width = columns * cellWidth + (columns - 1) * gap;
+  canvas.height = rows * (cellHeight + labelHeight) + (rows - 1) * gap;
   const context = canvas.getContext("2d");
   if (!context) throw new Error("无法创建视频关键帧画布");
   context.fillStyle = "#101014";
   context.fillRect(0, 0, canvas.width, canvas.height);
   images.forEach((img, index) => {
-    const x = index * (cellWidth + gap);
-    context.drawImage(img, x, 0, cellWidth, cellHeight);
+    const column = index % columns;
+    const row = Math.floor(index / columns);
+    const x = column * (cellWidth + gap);
+    const y = row * (cellHeight + labelHeight + gap);
+    context.drawImage(img, x, y, cellWidth, cellHeight);
     context.fillStyle = "rgba(0,0,0,0.55)";
-    context.fillRect(x, cellHeight, cellWidth, labelHeight);
+    context.fillRect(x, y + cellHeight, cellWidth, labelHeight);
     context.fillStyle = "#fff";
     context.font = "14px sans-serif";
     context.textAlign = "center";
-    context.fillText(`${index + 1}/${images.length}  ${timeLabel(frames[index].seconds)}`, x + cellWidth / 2, cellHeight + 16);
+    context.fillText(`${index + 1}/${images.length}  ${timeLabel(frames[index].seconds)}`, x + cellWidth / 2, y + cellHeight + 16);
   });
   return { dataUrl: canvas.toDataURL("image/jpeg", 0.72), durationSeconds: Math.round(duration) };
 }

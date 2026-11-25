@@ -934,6 +934,10 @@ export const DEFAULT_VIDEO_PRESET: VideoPreset = {
     duration: 8,
     ratio: "16:9",
     resolution: "720p",
+    fps: 24,
+    imageField: "image",
+    extraParams: "",
+    keepBackgroundSharp: true,
     endpointMode: "auto",
     extraPrompt: "",
     supportsMotionReference: false,
@@ -966,6 +970,12 @@ function normalizeVideoPreset(preset: Partial<VideoPreset> | null | undefined, i
         resolution: typeof preset?.resolution === "string" && preset.resolution.trim()
             ? preset.resolution.trim()
             : DEFAULT_VIDEO_PRESET.resolution,
+        fps: Number.isFinite(Number(preset?.fps)) ? Math.min(60, Math.max(8, Math.round(Number(preset?.fps)))) : DEFAULT_VIDEO_PRESET.fps,
+        imageField: typeof preset?.imageField === "string" && preset.imageField.trim()
+            ? preset.imageField.trim()
+            : DEFAULT_VIDEO_PRESET.imageField,
+        extraParams: typeof preset?.extraParams === "string" ? preset.extraParams : "",
+        keepBackgroundSharp: preset?.keepBackgroundSharp !== false,
         endpointMode: preset?.endpointMode === "generations" || preset?.endpointMode === "sora" ? preset.endpointMode : "auto",
         extraPrompt: typeof preset?.extraPrompt === "string" ? preset.extraPrompt : "",
         supportsMotionReference: preset?.supportsMotionReference === true,

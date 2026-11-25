@@ -22,6 +22,9 @@ type VideoRequest = {
     duration?: number;
     ratio?: string;
     resolution?: string;
+    fps?: number;
+    /** 高级参数：最后合并，可覆盖任何字段。 */
+    extraBody?: Record<string, unknown>;
     endpointMode?: "auto" | "generations" | "sora";
     taskId?: string;
 };
@@ -170,12 +173,29 @@ function normalizeStatus(raw: string): TaskState["status"] {
     return "pending";
 }
 
+/** 由比例 + 分辨率算出具体像素尺寸，供只认 size 的接口使用。 */
+function computePixelSize(ratio: string, resolution: string): string {
+    const height = /1080/.test(resolution) ? 1080 : /480/.test(resolution) ? 480 : 720;
+    const [rw, rh] = ratio.split(":").map(value => Number(value));
+    const widthRatio = Number.isFinite(rw) && rw > 0 ? rw : 16;
+    const heightRatio = Number.isFinite(rh) && rh > 0 ? rh : 9;
+    const width = Math.max(2, Math.round((height * widthRatio) / heightRatio / 2) * 2);
+    return `${width}x${height}`;
+}
+
+/** Sora 只接受 4 / 8 / 12 秒，就近取整。 */
+function toSoraSeconds(duration?: number): string {
+    const value = Number(duration) || 8;
+    if (value <= 6) return "4";
+    if (value <= 10) return "8";
+    return "12";
+}
+
 function buildSubmitBody(input: VideoRequest, style: "generations" | "sora"): Record<string, unknown> {
     const imageField = (input.imageField || "image").trim() || "image";
     const body: Record<string, unknown> = {
         model: input.model,
         prompt: input.prompt,
-        resolution: input.resolution || "720p",
     };
     if (input.image) body[imageField] = input.image;
     const extraField = (input.extraReferenceField || "").trim();
@@ -186,13 +206,21 @@ function buildSubmitBody(input: VideoRequest, style: "generations" | "sora"): Re
     if (input.motionReference) body[motionField] = input.motionReference;
 
     if (style === "sora") {
-        body.seconds = String(input.duration ?? 8);
-        body.size = input.ratio || "16:9";
+        body.seconds = toSoraSeconds(input.duration);
+        body.size = computePixelSize(input.ratio || "16:9", input.resolution || "720p");
     } else {
         body.duration = input.duration ?? 8;
         body.ratio = input.ratio || "16:9";
+        body.resolution = input.resolution || "720p";
+        if (input.fps) body.fps = input.fps;
         body.response_format = "url";
     }
+
+    if (input.extraBody && typeof input.extraBody === "object") {
+        Object.assign(body, input.extraBody);
+    }
+    // 绝不同时下发两个尺寸口径：只要带了 size，就移除 resolution，避免 conflicting resolution and size。
+    if (body.size !== undefined) delete body.resolution;
     return body;
 }
 

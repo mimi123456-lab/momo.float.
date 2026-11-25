@@ -11,7 +11,7 @@ import {
     saveVideoGenerationSettings,
 } from "@/lib/settings-storage";
 import { storeMediaBlob } from "@/lib/media-cache-storage";
-import { getVideoGenerationDailyUsage, fetchVideoGenerationModels } from "@/lib/video-generation-service";
+import { getVideoGenerationDailyUsage, fetchVideoGenerationModels, inferVideoPresetDefaults } from "@/lib/video-generation-service";
 import { Input, Select, Textarea, Toggle } from "@/components/ui/form";
 import { Alert } from "@/components/ui/feedback";
 
@@ -122,6 +122,18 @@ export function VideoGenerationSettings() {
         setTestResult("");
         setTestError("");
         try {
+            let extraBody: Record<string, unknown> | undefined;
+            if (activePreset.extraParams.trim()) {
+                try {
+                    const parsed = JSON.parse(activePreset.extraParams) as unknown;
+                    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+                        throw new Error("必须是 JSON 对象");
+                    }
+                    extraBody = parsed as Record<string, unknown>;
+                } catch {
+                    throw new Error("高级请求参数不是合法的 JSON 对象");
+                }
+            }
             const response = await fetch("/api/video-generation", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -133,6 +145,9 @@ export function VideoGenerationSettings() {
                     duration: activePreset.duration,
                     ratio: activePreset.ratio,
                     resolution: activePreset.resolution,
+                    fps: activePreset.fps,
+                    imageField: activePreset.imageField,
+                    extraBody,
                     endpointMode: activePreset.endpointMode,
                 }),
             });
@@ -275,11 +290,21 @@ export function VideoGenerationSettings() {
                             </div>
                             {modelError && <span className="ts-12" style={{ color: "var(--c-danger, #e5484d)" }}>{modelError}</span>}
                             {models.length > 0 && (
-                                <Select value={activePreset.model} onChange={(event) => updatePreset({ model: event.target.value })}>
+                                <Select
+                                    value={activePreset.model}
+                                    onChange={(event) => updatePreset({ model: event.target.value, ...inferVideoPresetDefaults(event.target.value) })}
+                                >
                                     {!models.includes(activePreset.model) && <option value={activePreset.model}>{activePreset.model}</option>}
                                     {models.map(model => <option key={model} value={model}>{model}</option>)}
                                 </Select>
                             )}
+                            <button
+                                className="ui-btn ui-btn-ghost self-start"
+                                onClick={() => updatePreset(inferVideoPresetDefaults(activePreset.model))}
+                                disabled={!activePreset.model.trim()}
+                            >
+                                按模型自动配置（端点 / 帧率 / 首帧字段）
+                            </button>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                             <div className="flex flex-col gap-1">
@@ -319,6 +344,26 @@ export function VideoGenerationSettings() {
                                 </Select>
                             </div>
                         </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <div className="flex flex-col gap-1">
+                                <label className="menu-desc ml-1">帧率 fps（Sora 自动 30，其余 24）</label>
+                                <Input
+                                    type="number"
+                                    min={8}
+                                    max={60}
+                                    value={activePreset.fps}
+                                    onChange={(event) => updatePreset({ fps: Math.min(60, Math.max(8, Number(event.target.value) || 24)) })}
+                                />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                <label className="menu-desc ml-1">首帧参考图字段名</label>
+                                <Input
+                                    value={activePreset.imageField}
+                                    placeholder="image / input_reference"
+                                    onChange={(event) => updatePreset({ imageField: event.target.value })}
+                                />
+                            </div>
+                        </div>
                         <div className="flex flex-col gap-1">
                             <label className="menu-desc ml-1">参考视频字段名（动作参考，按中转站文档填）</label>
                             <Input
@@ -340,12 +385,34 @@ export function VideoGenerationSettings() {
                                 />
                             </span>
                         </div>
+                        <div className="menu-item" style={{ padding: 0 }}>
+                            <span className="settings-tools-menu-copy">
+                                <span className="menu-label appearance-menu-item-label">背景保持清晰（不虚化）</span>
+                                <span className="menu-desc settings-tools-menu-desc">开启后提示词会明确要求背景清晰、不要散景；部分模型仍有默认人像虚化，只能降低概率。</span>
+                            </span>
+                            <span className="menu-right settings-tools-menu-toggle">
+                                <Toggle
+                                    checked={activePreset.keepBackgroundSharp}
+                                    onChange={(keepBackgroundSharp) => updatePreset({ keepBackgroundSharp })}
+                                    className="settings-toggle-control"
+                                />
+                            </span>
+                        </div>
                         <div className="flex flex-col gap-1">
                             <label className="menu-desc ml-1">用户参考图字段名（留空默认 reference_image；两人同框时会自动合成参考板）</label>
                             <Input
                                 value={activePreset.userReferenceField}
                                 placeholder="reference_image"
                                 onChange={(event) => updatePreset({ userReferenceField: event.target.value })}
+                            />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                            <label className="menu-desc ml-1">高级请求参数（JSON，可选；会合并进请求体并覆盖同名项）</label>
+                            <Textarea
+                                value={activePreset.extraParams}
+                                rows={3}
+                                placeholder={'例如：{"mode":"std","cfg_scale":0.5}'}
+                                onChange={(event) => updatePreset({ extraParams: event.target.value })}
                             />
                         </div>
                         <div className="flex flex-col gap-1">

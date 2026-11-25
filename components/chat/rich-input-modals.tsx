@@ -96,6 +96,7 @@ export function VideoInputModal({ onSend, onClose }: VideoInputModalProps) {
     const [error, setError] = useState("");
     const [contactSheet, setContactSheet] = useState("");
     const [duration, setDuration] = useState(0);
+    const [frameHint, setFrameHint] = useState("");
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
@@ -117,13 +118,15 @@ export function VideoInputModal({ onSend, onClose }: VideoInputModalProps) {
             return URL.createObjectURL(picked);
         });
         setBusy(true);
+        setFrameHint("");
         try {
-            const result = await buildVideoContactSheet(picked, { frameCount: 4 });
+            const result = await buildVideoContactSheet(picked, { onProgress: setFrameHint });
             setContactSheet(result.dataUrl);
             setDuration(result.durationSeconds);
         } catch (err) {
             setError(err instanceof Error ? err.message : "读取视频失败，请换 MP4/H.264 再试");
         } finally {
+            setFrameHint("");
             setBusy(false);
         }
     };
@@ -150,7 +153,7 @@ export function VideoInputModal({ onSend, onClose }: VideoInputModalProps) {
                     )}
                     <input ref={fileInputRef} type="file" accept="video/*" className="hidden" onChange={handleFileChange} />
                 </div>
-                {busy && <div className="ts-12 text-center opacity-70">正在抽取关键帧，让他能“看到”视频…</div>}
+                {busy && <div className="ts-12 text-center opacity-70">{frameHint || "正在抽取关键帧，让他能“看到”视频…"}</div>}
                 {error && <div className="ts-12 text-center" style={{ color: "var(--c-danger, #e5484d)" }}>{error}</div>}
                 <input
                     value={desc}
