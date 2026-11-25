@@ -4244,7 +4244,7 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
         return true;
     };
 
-    const handleMeetingInviteAction = async (invite: ChatMessage, action: "accept" | "decline") => {
+    const handleMeetingInviteAction = async (invite: ChatMessage, action: "accept" | "story" | "decline") => {
         if (invite.mediaData?.meetingInviteStatus && invite.mediaData.meetingInviteStatus !== "pending") return;
         const resolvedAt = new Date().toISOString();
         if (action === "decline") {
@@ -4264,6 +4264,51 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
             const characterName = invite.mediaData?.meetingInviteCharacterName || character?.name || "角色";
             const meetingDescription = invite.mediaData?.meetingInviteDescription?.trim();
             const acceptedReaction = invite.mediaData?.meetingInviteAcceptResponse?.trim();
+
+            if (action === "story") {
+                // 选择「进入剧情」：沿用原来的见面剧情分线逻辑并跳转到剧情 App。
+                await hydrateStoryStorage();
+                const characterId = invite.mediaData?.meetingInviteCharacterId || session.contactId;
+                const mainSession = loadStorySessionsForOwner("single", characterId)
+                    .find((item) => (item.branchId || "main") === "main")
+                    || createOrGetStorySession(characterId, { ownerType: "single", ownerId: characterId, branchId: "main" });
+                const now = new Date();
+                const branchName = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+                const storySession = createOrGetStorySession(characterId, {
+                    ownerType: "single",
+                    ownerId: characterId,
+                    participantIds: [characterId],
+                    branchId: `invite_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+                    branchName,
+                    inheritRecentMemory: true,
+                    independentStory: false,
+                    baseSession: mainSession,
+                });
+                const launchPrompt = `${characterName}在线上邀请${userIdentity?.name || "用户"}线下见面，用户已经同意。${meetingDescription ? `邀请说明：${meetingDescription}。` : ""}${acceptedReaction ? `${characterName}对此的反应是：${acceptedReaction}。` : ""}请由${characterName}根据刚才的私聊语境自然开启这次见面剧情。`;
+                updateStorySession(storySession.id, {
+                    autoStartPrompt: launchPrompt,
+                    autoStartRequestedAt: resolvedAt,
+                });
+                const nextStorySession = {
+                    ...storySession,
+                    autoStartPrompt: launchPrompt,
+                    autoStartRequestedAt: resolvedAt,
+                };
+                saveStoryLaunchTarget(nextStorySession);
+
+                const nextMediaData: ChatMessage["mediaData"] = {
+                    ...invite.mediaData,
+                    meetingInviteStatus: "story",
+                    meetingInviteResolvedAt: resolvedAt,
+                    meetingInviteStorySessionId: storySession.id,
+                };
+                updateMessageMediaData(invite.id, nextMediaData);
+                setMessages((current) => current.map((item) => item.id === invite.id ? { ...item, mediaData: nextMediaData } : item));
+                window.dispatchEvent(new CustomEvent("open-app", { detail: { appId: "story" } }));
+                return;
+            }
+
+            // 选择「线下见面」：直接进入本会话的线下模式；线上从此知道两人此刻在一起。
             const nextMediaData: ChatMessage["mediaData"] = {
                 ...invite.mediaData,
                 meetingInviteStatus: "accepted",
@@ -4271,13 +4316,12 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
             };
             updateMessageMediaData(invite.id, nextMediaData);
             setMessages((current) => current.map((item) => item.id === invite.id ? { ...item, mediaData: nextMediaData } : item));
-            // 接受见面邀请后直接进入本会话的线下模式；线上从此知道两人此刻在一起。
             setSessionOfflineMode(session.id, true);
             setOfflineMode(true);
             const opening = `（我答应了这次见面${meetingDescription ? `：${meetingDescription}` : ""}。${acceptedReaction ? `${characterName}的反应是：${acceptedReaction}。` : ""}）`;
             handleOfflineSend(opening);
         } catch (error) {
-            showChatToast(error instanceof Error ? error.message : "进入线下见面失败，请稍后再试");
+            showChatToast(error instanceof Error ? error.message : "进入见面失败，请稍后再试");
         }
     };
 

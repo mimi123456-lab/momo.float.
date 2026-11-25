@@ -149,6 +149,17 @@ function newShortcutAction(): BridgeShortcutAction {
   };
 }
 
+/** 截图模板：一键填好「运行快捷指令→截图→回传图片」的动作骨架，用户只用来套用。 */
+function newScreenshotAction(): BridgeShortcutAction {
+  return {
+    ...newShortcutAction(),
+    name: "截图给我看",
+    shortcutName: "小手机截图",
+    description: "角色让你截图时，运行 iOS 快捷指令截取当前屏幕并把图片回传给我",
+    resultMode: "image",
+  };
+}
+
 function shortcutStatusLabel(status: ShortcutCommand["status"]): string {
   if (status === "pending") return "等待执行";
   if (status === "claimed") return "执行中";
@@ -1033,11 +1044,16 @@ export function RealityBridgeApp({ onClose, onNotice }: {
                     </div>
                   )) : null}
 
+                  {mainSec === "shortcuts" && shortcutActions.length > 0 ? (
+                    <button type="button" className="rb-btn" style={{ marginBottom: 10 }} onClick={() => openShortcutEditor(newScreenshotAction(), false)}>用「截图模板」新建</button>
+                  ) : null}
+
                   {mainSec === "shortcuts" ? (shortcutActions.length === 0 ? (
                     <div className="rb-empty">
                       <b>还没有快捷动作</b>
                       <p>把角色工具绑定到你已有的 iOS 快捷指令。角色调用时会发系统通知，轻点后运行。</p>
                       <button type="button" className="rb-btn" onClick={() => openShortcutEditor(newShortcutAction(), false)}>新建快捷动作</button>
+                      <button type="button" className="rb-btn" onClick={() => openShortcutEditor(newScreenshotAction(), false)}>用「截图模板」新建</button>
                     </div>
                   ) : (
                     <div className="rb-grid">

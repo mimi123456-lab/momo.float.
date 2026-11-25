@@ -44,7 +44,7 @@ interface MessageBubbleProps {
     characterId?: string;
     onMusicPlay?: (title: string, artist?: string) => void;
     onActionSelect?: (text: string) => void;
-    onMeetingInviteAction?: (msg: ChatMessage, action: "accept" | "decline") => void;
+    onMeetingInviteAction?: (msg: ChatMessage, action: "accept" | "story" | "decline") => void;
     displayContent?: string;
     defaultTranslationExpanded?: boolean;
     onFavoriteMedia?: (msg: ChatMessage) => void | Promise<void>;
@@ -178,16 +178,17 @@ function MeetingInviteBubble({
 }: {
     msg: ChatMessage;
     charName?: string;
-    onAction?: (msg: ChatMessage, action: "accept" | "decline") => void;
+    onAction?: (msg: ChatMessage, action: "accept" | "story" | "decline") => void;
 }) {
     const status = msg.mediaData?.meetingInviteStatus || "pending";
     const config = resolveMeetingInviteCardConfig(loadChatAppSettings());
     const inviter = msg.mediaData?.meetingInviteCharacterName || charName || "他";
     const title = msg.mediaData?.meetingInviteTitle || `${inviter}想邀请你见面，是否同意？`;
-    const description = msg.mediaData?.meetingInviteDescription || "同意后会自动建立新的剧情分线，并从这次见面开始。";
-    const acceptResponse = msg.mediaData?.meetingInviteAcceptResponse || "已同意，正在进入见面剧情";
+    const description = msg.mediaData?.meetingInviteDescription || "选择进入「线下」在本会话见面，或进入「剧情」新建一条见面分线。";
+    const acceptResponse = msg.mediaData?.meetingInviteAcceptResponse || "已同意，正在进入线下见面";
+    const storyResponse = "已选择剧情见面，正在为你开启剧情";
     const declineResponse = msg.mediaData?.meetingInviteDeclineResponse || "已选择不见面";
-    const resolvedLabel = status === "accepted" ? acceptResponse : declineResponse;
+    const resolvedLabel = status === "accepted" ? acceptResponse : status === "story" ? storyResponse : declineResponse;
     const storedRaw = msg.mediaData?.meetingInviteRaw?.trim();
     const raw = [
         storedRaw || [
@@ -214,14 +215,15 @@ function MeetingInviteBubble({
     }
     return (
         <section className="meeting-invite-card" data-status={status}>
-            <style>{`.meeting-invite-card{width:250px;max-width:72vw;padding:16px;border-radius:16px;background:linear-gradient(145deg,#fffaf2,#fff);border:1px solid rgba(160,120,76,.18);box-shadow:0 8px 24px rgba(82,58,34,.10);color:#47382d}.meeting-invite-eyebrow{font-size:11px;letter-spacing:.16em;opacity:.56;margin-bottom:8px}.meeting-invite-title{display:block;font-size:15px;line-height:1.45}.meeting-invite-desc{margin:7px 0 14px;font-size:12px;opacity:.65}.meeting-invite-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.meeting-invite-actions button{border-radius:10px;padding:9px 8px}.meeting-invite-decline{border:1px solid rgba(71,56,45,.16);background:rgba(255,255,255,.72);color:inherit}.meeting-invite-accept{border:0;background:#4b4038;color:#fff}.meeting-invite-result{padding-top:3px;font-size:12px;opacity:.72}`}</style>
+            <style>{`.meeting-invite-card{width:250px;max-width:72vw;padding:16px;border-radius:16px;background:linear-gradient(145deg,#fffaf2,#fff);border:1px solid rgba(160,120,76,.18);box-shadow:0 8px 24px rgba(82,58,34,.10);color:#47382d}.meeting-invite-eyebrow{font-size:11px;letter-spacing:.16em;opacity:.56;margin-bottom:8px}.meeting-invite-title{display:block;font-size:15px;line-height:1.45}.meeting-invite-desc{margin:7px 0 14px;font-size:12px;opacity:.65}.meeting-invite-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.meeting-invite-actions button{border-radius:10px;padding:9px 8px}.meeting-invite-decline{grid-column:1 / -1;border:1px solid rgba(71,56,45,.16);background:rgba(255,255,255,.72);color:inherit}.meeting-invite-story{border:1px solid rgba(71,56,45,.16);background:rgba(255,255,255,.72);color:inherit}.meeting-invite-accept{border:0;background:#4b4038;color:#fff}.meeting-invite-result{padding-top:3px;font-size:12px;opacity:.72}`}</style>
             <div className="meeting-invite-eyebrow">OFFLINE INVITATION</div>
             <strong className="meeting-invite-title">{title}</strong>
             <p className="meeting-invite-desc">{description}</p>
             {status === "pending" ? (
                 <div className="meeting-invite-actions">
+                    <button type="button" className="meeting-invite-accept" onClick={() => onAction?.(msg, "accept")}>线下见面</button>
+                    <button type="button" className="meeting-invite-story" onClick={() => onAction?.(msg, "story")}>进入剧情</button>
                     <button type="button" className="meeting-invite-decline" onClick={() => onAction?.(msg, "decline")}>不同意（不要见面）</button>
-                    <button type="button" className="meeting-invite-accept" onClick={() => onAction?.(msg, "accept")}>同意</button>
                 </div>
             ) : (
                 <div className="meeting-invite-result">{resolvedLabel}</div>
