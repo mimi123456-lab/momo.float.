@@ -53,7 +53,9 @@ async function extractFrames(
     if (!Number.isFinite(duration) || duration <= 0) throw new Error("读取不到视频时长，无法抽取关键帧。");
     const width = video.videoWidth || 960;
     const height = video.videoHeight || 540;
-    const scale = Math.min(1, 960 / Math.max(width, height));
+    // 自适应抓图只需要够拼图用，压到 720 可显著减少解码/编码耗时。
+    const maxDimension = mode === "adaptive" ? 720 : 960;
+    const scale = Math.min(1, maxDimension / Math.max(width, height));
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(width * scale));
     canvas.height = Math.max(1, Math.round(height * scale));
@@ -73,59 +75,81 @@ async function extractFrames(
       await seeked;
     };
 
-    // 自适应模式：先低成本探测画面变化，把帧优先给动作幅度大的时刻，
-    // 再补齐到目标帧数，避免固定均匀抽帧漏掉中间动作（如连续手势舞）。
-    const selectAdaptiveTimes = async (): Promise<number[]> => {
+    // 自适应模式：单次遍历候选帧，边抓图边算画面差异，选中后直接复用，
+    // 避免“先探测再重抓”做两遍 seek（移动端 seek 是主要耗时来源）。
+    if (mode === "adaptive") {
+      const target = count;
+      const candidateCount = Math.min(18, Math.max(6, Math.ceil(duration / 1.2)));
       const probe = document.createElement("canvas");
       probe.width = 40;
       probe.height = 40;
       const probeContext = probe.getContext("2d", { alpha: false });
-      if (!probeContext) return uniformTimes();
-      const candidateCount = Math.min(30, Math.max(count * 2, Math.round(duration)));
-      const scored: { seconds: number; diff: number }[] = [];
-      let previous: Uint8ClampedArray | null = null;
-      for (let i = 0; i < candidateCount; i++) {
-        const seconds = Math.min(Math.max(0, duration - 0.08), duration * ((i + 0.5) / candidateCount));
-        progress?.("正在分析动作变化 " + (i + 1) + "/" + candidateCount + "…");
-        await seekTo(seconds);
-        probeContext.drawImage(video, 0, 0, probe.width, probe.height);
-        const data = probeContext.getImageData(0, 0, probe.width, probe.height).data;
-        let diff = 0;
-        if (previous) {
-          for (let p = 0; p < data.length; p += 4) {
-            diff += Math.abs(data[p] - previous[p])
-              + Math.abs(data[p + 1] - previous[p + 1])
-              + Math.abs(data[p + 2] - previous[p + 2]);
+      if (probeContext) {
+        const candidates: { seconds: number; dataUrl: string; diff: number }[] = [];
+        let previous: Uint8ClampedArray | null = null;
+        for (let i = 0; i < candidateCount; i += 1) {
+          const seconds = Math.min(Math.max(0, duration - 0.08), duration * ((i + 0.5) / candidateCount));
+          progress?.("正在分析动作变化 " + (i + 1) + "/" + candidateCount + "…");
+          await seekTo(seconds);
+          context.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.72);
+          probeContext.drawImage(canvas, 0, 0, probe.width, probe.height);
+          const data = probeContext.getImageData(0, 0, probe.width, probe.height).data;
+          let diff = 0;
+          if (previous) {
+            for (let p = 0; p < data.length; p += 4) {
+              diff += Math.abs(data[p] - previous[p])
+                + Math.abs(data[p + 1] - previous[p + 1])
+                + Math.abs(data[p + 2] - previous[p + 2]);
+            }
+          }
+          candidates.push({ seconds, dataUrl, diff });
+          previous = data;
+        }
+        const chosen: number[] = [0];
+        const minGap = duration / (target * 1.4);
+        const byDiff = candidates.map((_, index) => index).slice(1).sort((a, b) => candidates[b].diff - candidates[a].diff);
+        for (const index of byDiff) {
+          if (chosen.length >= target) break;
+          if (chosen.every(picked => Math.abs(candidates[picked].seconds - candidates[index].seconds) >= minGap)) {
+            chosen.push(index);
           }
         }
-        scored.push({ seconds, diff });
-        previous = data;
-      }
-      const chosen: { seconds: number; diff: number }[] = [scored[0]];
-      const minGap = duration / (count * 1.4);
-      const byDiff = scored.slice(1).sort((a, b) => b.diff - a.diff);
-      for (const item of byDiff) {
-        if (chosen.length >= count) break;
-        if (chosen.every(picked => Math.abs(picked.seconds - item.seconds) >= minGap)) chosen.push(item);
-      }
-      if (chosen.length < count) {
-        for (const seconds of uniformTimes()) {
-          if (chosen.length >= count) break;
-          if (chosen.every(picked => Math.abs(picked.seconds - seconds) >= minGap / 2)) {
-            chosen.push({ seconds, diff: 0 });
-          }
+        // 动作少的视频补均匀帧，保证整段都有覆盖。
+        for (let i = 0; i < target && chosen.length < target; i += 1) {
+          const seconds = Math.min(Math.max(0, duration - 0.08), duration * ((i + 0.5) / target));
+          let nearest = -1;
+          let nearestDistance = -1;
+          candidates.forEach((candidate, index) => {
+            if (chosen.includes(index)) return;
+            const distance = Math.abs(candidate.seconds - seconds);
+            if (distance > nearestDistance) {
+              nearestDistance = distance;
+              nearest = index;
+            }
+          });
+          if (nearest >= 0) chosen.push(nearest);
         }
+        chosen.sort((a, b) => candidates[a].seconds - candidates[b].seconds);
+        for (const index of chosen) {
+          const candidate = candidates[index];
+          frames.push({
+            seconds: candidate.seconds,
+            dataUrl: candidate.dataUrl,
+            base64: candidate.dataUrl.slice(candidate.dataUrl.indexOf(",") + 1),
+          });
+        }
+        return { frames, duration };
       }
-      return chosen.sort((a, b) => a.seconds - b.seconds).map(item => item.seconds);
-    };
+    }
 
-    const times = mode === "adaptive" ? await selectAdaptiveTimes() : uniformTimes();
-    for (let i = 0; i < times.length; i++) {
-      progress?.("正在本地抽取关键帧 " + (i + 1) + "/" + times.length + "…");
-      await seekTo(times[i]);
+    for (let i = 0; i < count; i++) {
+      const seconds = uniformTimes()[i];
+      progress?.("正在本地抽取关键帧 " + (i + 1) + "/" + count + "…");
+      await seekTo(seconds);
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
       const dataUrl = canvas.toDataURL("image/jpeg", 0.72);
-      frames.push({ seconds: times[i], dataUrl, base64: dataUrl.slice(dataUrl.indexOf(",") + 1) });
+      frames.push({ seconds, dataUrl, base64: dataUrl.slice(dataUrl.indexOf(",") + 1) });
     }
     return { frames, duration };
   } finally {
@@ -356,6 +380,7 @@ export async function buildVideoContactSheet(
   // frameCount 不传时按视频时长和动作变化自动抽取（4~12 帧）。
   const { frames, duration } = await extractFrames(file, options?.frameCount ?? 0, options?.signal, options?.onProgress, "adaptive");
   if (frames.length === 0) throw new Error("没有抽取到视频画面");
+  options?.onProgress?.("正在拼接关键帧…");
   const images = await Promise.all(frames.map(frame => new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
     img.onload = () => resolve(img);
