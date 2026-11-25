@@ -93,6 +93,20 @@ export function getVideoGenerationDailyUsage(): { used: number; limit: number } 
 }
 
 /** 从中转站的 /v1/models 拉取可选模型；沿用生图的通用模型列表代理。 */
+/** 视频生成是否真的可用（启用 + 当前方案配置完整）；提示词注入与失败提示都按这个判断。 */
+export function isVideoGenerationConfigured(): boolean {
+    const settings = loadVideoGenerationSettings();
+    if (!settings.enabled) return false;
+    const preset = settings.presets.find(item => item.id === settings.activePresetId) || settings.presets[0];
+    if (!preset?.model?.trim() || !preset.baseUrl?.trim()) return false;
+    if (settings.inheritImageApi) {
+        const image = loadImageGenerationSettings();
+        const imagePreset = image.openaiPresets?.find(item => item.id === image.activeOpenAiPresetId) || image.openaiPresets?.[0];
+        return Boolean(imagePreset?.baseUrl?.trim() && imagePreset?.apiKey?.trim());
+    }
+    return Boolean(preset.apiKey?.trim());
+}
+
 export async function fetchVideoGenerationModels(preset: Pick<VideoPreset, "apiKey" | "baseUrl">): Promise<string[]> {
     const response = await fetch("/api/image-generation/models", {
         method: "POST",

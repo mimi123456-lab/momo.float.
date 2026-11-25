@@ -3,6 +3,7 @@
 import { createSseJsonParser } from "./sse-json";
 import { maybeAppendShortcutCapability } from "./offline-shortcut-capability";
 import { loadOfflineStylePrompt } from "./chat-offline-style";
+import { isVideoGenerationConfigured } from "./video-generation-service";
 import { loadCharacters } from "./character-storage";
 import { buildScreenEffectPromptHint } from "./chat-screen-effects";
 import { emitChatPluginEvent, runChatPluginTransform } from "./chat-plugin-hooks";
@@ -2065,6 +2066,27 @@ export async function buildChatPromptMessages(
         const offlineStyle = loadOfflineStylePrompt().trim();
         if (offlineStyle) {
             llmMessages.push({ role: "system", content: `## 线下文风要求\n${offlineStyle}` });
+        }
+    }
+    // 视频/动图能力说明兜底：预设是用户本地副本，老预设或自定义预设可能没有这条指令，
+    // 角色会不知道自己能主动发视频。只在线上聊天、且视频生成已配置时注入。
+    if (!isOfflineMode && isVideoGenerationConfigured()) {
+        const videoDirectiveDeclared = llmMessages.some(message => (
+            typeof message.content === "string" && message.content.includes("[视频:画面描述]")
+        ));
+        if (!videoDirectiveDeclared) {
+            llmMessages.push({
+                role: "system",
+                content: [
+                    "<chat_video_directive>",
+                    "## 发视频 / 动图",
+                    "【格式】[视频:画面描述] 或 [动图:画面描述]",
+                    "【规则】动图=实况，生成短秒数短片并静音循环播放；视频带播放条。描述按视频提示词写：主体、动作、镜头、环境、光线，只写可见画面，不写心理和剧情。",
+                    "【锁脸】画面中出现你自己时，会强制使用角色参考图锁脸。",
+                    "【频率】同一轮最多发一条；不要连续两轮都发；没有合适场景不要使用。",
+                    "</chat_video_directive>",
+                ].join("\n"),
+            });
         }
     }
     // 状态栏契约兜底：
