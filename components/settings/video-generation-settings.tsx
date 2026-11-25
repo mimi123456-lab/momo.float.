@@ -199,7 +199,31 @@ export function VideoGenerationSettings() {
                         <span className="menu-desc settings-tools-menu-desc">用户参考图按该角色绑定的用户身份自动匹配（配置绑定 → 用户身份），缺图时会报错。</span>
                     </span>
                     <span className="menu-right settings-tools-menu-toggle">
-                        <Toggle checked={settings.includeUserReference} onChange={(includeUserReference) => update({ includeUserReference })} className="settings-toggle-control" />
+                        <Toggle
+                            checked={settings.includeUserReference}
+                            onChange={(includeUserReference) => {
+                                if (!activePreset) {
+                                    update({ includeUserReference });
+                                    return;
+                                }
+                                // 勾选用户参考图时，自动补好该模型需要单独发送参考图的字段名。
+                                const needsField = includeUserReference
+                                    && activePreset.imageField === "image"
+                                    && !activePreset.userReferenceField.trim();
+                                if (!needsField) {
+                                    update({ includeUserReference });
+                                    return;
+                                }
+                                persist({
+                                    ...settings,
+                                    includeUserReference,
+                                    presets: settings.presets.map(preset => preset.id === activePreset.id
+                                        ? { ...preset, userReferenceField: "reference_image" }
+                                        : preset),
+                                });
+                            }}
+                            className="settings-toggle-control"
+                        />
                     </span>
                 </div>
             </div>
@@ -305,6 +329,16 @@ export function VideoGenerationSettings() {
                             >
                                 按模型自动配置（端点 / 帧率 / 首帧字段）
                             </button>
+                            <div className="ml-1 ts-12 leading-relaxed" style={{ opacity: 0.62 }}>
+                                将发送：{activePreset.model.trim() || "（未选模型）"} · {activePreset.duration}s · {activePreset.ratio} · {activePreset.resolution} · {activePreset.fps}fps · 首帧字段 {activePreset.imageField.trim() || "image"}
+                                <br />
+                                {activePreset.supportsMotionReference
+                                    ? `动作参考字段：${activePreset.motionReferenceField.trim() || "video_url"}`
+                                    : "动作参考：未启用（勾选「支持参考视频」后才会发送）"}
+                                {settings.includeUserReference && activePreset.imageField !== "image"
+                                    ? " · 用户参考图会合并进首帧一起发送"
+                                    : ""}
+                            </div>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                             <div className="flex flex-col gap-1">
@@ -380,7 +414,12 @@ export function VideoGenerationSettings() {
                             <span className="menu-right settings-tools-menu-toggle">
                                 <Toggle
                                     checked={activePreset.supportsMotionReference}
-                                    onChange={(supportsMotionReference) => updatePreset({ supportsMotionReference })}
+                                    onChange={(supportsMotionReference) => updatePreset({
+                                        supportsMotionReference,
+                                        ...(supportsMotionReference && !activePreset.motionReferenceField.trim()
+                                            ? { motionReferenceField: "video_url" }
+                                            : {}),
+                                    })}
                                     className="settings-toggle-control"
                                 />
                             </span>
@@ -407,7 +446,7 @@ export function VideoGenerationSettings() {
                             />
                         </div>
                         <div className="flex flex-col gap-1">
-                            <label className="menu-desc ml-1">高级请求参数（JSON，可选；会合并进请求体并覆盖同名项）</label>
+                            <label className="menu-desc ml-1">高级请求参数（JSON，可选；合并进请求体并覆盖同名项，值填 null 可删除该字段）</label>
                             <Textarea
                                 value={activePreset.extraParams}
                                 rows={3}

@@ -253,8 +253,17 @@ function parseExtraParams(text: string): Record<string, unknown> | undefined {
 export function inferVideoPresetDefaults(model: string): Partial<VideoPreset> {
     const name = model.toLowerCase();
     if (name.includes("sora")) {
-        // Sora 走 /videos，首帧字段是 input_reference，不支持动作参考视频，也不接受 resolution。
-        return { endpointMode: "sora", fps: 30, imageField: "input_reference", resolution: "720p" };
+        // Sora 走 /videos，首帧字段是 input_reference，只接受一张图，
+        // 也不支持动作参考视频，且不接受 resolution（改由 size 表达）。
+        return {
+            endpointMode: "sora",
+            fps: 30,
+            imageField: "input_reference",
+            resolution: "720p",
+            supportsMotionReference: false,
+            motionReferenceField: "",
+            userReferenceField: "",
+        };
     }
     if (name.includes("veo")) {
         return { endpointMode: "generations", fps: 24, imageField: "image" };

@@ -218,6 +218,10 @@ function buildSubmitBody(input: VideoRequest, style: "generations" | "sora"): Re
 
     if (input.extraBody && typeof input.extraBody === "object") {
         Object.assign(body, input.extraBody);
+        // 值为 null 表示删除该字段，便于去掉某些中转站不接受的参数（如 {"fps":null}）。
+        for (const key of Object.keys(body)) {
+            if (body[key] === null) delete body[key];
+        }
     }
     // 绝不同时下发两个尺寸口径：只要带了 size，就移除 resolution，避免 conflicting resolution and size。
     if (body.size !== undefined) delete body.resolution;
