@@ -11,7 +11,7 @@ import {
     saveVideoGenerationSettings,
 } from "@/lib/settings-storage";
 import { storeMediaBlob } from "@/lib/media-cache-storage";
-import { getVideoGenerationDailyUsage } from "@/lib/video-generation-service";
+import { getVideoGenerationDailyUsage, fetchVideoGenerationModels } from "@/lib/video-generation-service";
 import { Input, Select, Textarea, Toggle } from "@/components/ui/form";
 import { Alert } from "@/components/ui/feedback";
 
@@ -29,6 +29,9 @@ export function VideoGenerationSettings() {
     const [testResult, setTestResult] = useState("");
     const [testError, setTestError] = useState("");
     const [dailyUsage, setDailyUsage] = useState({ used: 0, limit: 0 });
+    const [models, setModels] = useState<string[]>([]);
+    const [modelLoading, setModelLoading] = useState(false);
+    const [modelError, setModelError] = useState("");
     const fileRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
@@ -41,6 +44,11 @@ export function VideoGenerationSettings() {
             baseUrl: preset.baseUrl,
         })));
     }, []);
+
+    useEffect(() => {
+        setModels([]);
+        setModelError("");
+    }, [settings.activePresetId]);
 
     const persist = useCallback((next: VideoGenerationSettingsType) => {
         setSettings(next);
@@ -87,6 +95,25 @@ export function VideoGenerationSettings() {
         }
         const ref = await storeMediaBlob(file, file.type || "video/mp4", "video");
         update({ motionReferenceRef: ref, motionReferenceName: file.name, motionReferenceUrl: undefined });
+    };
+
+    const loadModels = async () => {
+        if (!activePreset) return;
+        setModelLoading(true);
+        setModelError("");
+        try {
+            const list = await fetchVideoGenerationModels(activePreset);
+            if (list.length === 0) throw new Error("中转站没有返回模型列表");
+            const videoHints = /video|sora|veo|kling|seedance|wan|hailuo|pixverse|runway|vidu|minimax|jimeng|doubao/i;
+            const sorted = [...list].sort((a, b) => Number(videoHints.test(b)) - Number(videoHints.test(a)));
+            setModels(sorted);
+            if (!sorted.includes(activePreset.model)) updatePreset({ model: sorted[0] });
+        } catch (error) {
+            setModels([]);
+            setModelError(error instanceof Error ? error.message : String(error));
+        } finally {
+            setModelLoading(false);
+        }
     };
 
     const runTest = async () => {
@@ -230,11 +257,28 @@ export function VideoGenerationSettings() {
                         </div>
                         <div className="flex flex-col gap-1">
                             <label className="menu-desc ml-1">视频模型</label>
-                            <Input
-                                value={activePreset.model}
-                                placeholder="sora-2 / veo3 / kling-v2 ..."
-                                onChange={(event) => updatePreset({ model: event.target.value })}
-                            />
+                            <div className="flex gap-2">
+                                <Input
+                                    value={activePreset.model}
+                                    placeholder="sora-2 / veo3 / kling-v2 ..."
+                                    onChange={(event) => updatePreset({ model: event.target.value })}
+                                />
+                                <button
+                                    className="ui-btn ui-btn-outline"
+                                    onClick={loadModels}
+                                    disabled={modelLoading || !activePreset.baseUrl || !activePreset.apiKey}
+                                >
+                                    {modelLoading ? <RefreshCw size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                                    {modelLoading ? "拉取中…" : "拉取模型"}
+                                </button>
+                            </div>
+                            {modelError && <span className="ts-12" style={{ color: "var(--c-danger, #e5484d)" }}>{modelError}</span>}
+                            {models.length > 0 && (
+                                <Select value={activePreset.model} onChange={(event) => updatePreset({ model: event.target.value })}>
+                                    {!models.includes(activePreset.model) && <option value={activePreset.model}>{activePreset.model}</option>}
+                                    {models.map(model => <option key={model} value={model}>{model}</option>)}
+                                </Select>
+                            )}
                         </div>
                         <div className="grid grid-cols-3 gap-2">
                             <div className="flex flex-col gap-1">

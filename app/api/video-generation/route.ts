@@ -48,9 +48,9 @@ function normalizeBaseUrl(baseUrl: string): string {
 
 function buildSubmitUrls(baseUrl: string, mode: string): string[] {
     const base = normalizeBaseUrl(baseUrl);
-    if (mode === "generations") return [`${base}/videos/generations`];
+    if (mode === "generations") return [`${base}/videos/generations`, `${base}/video/generations`];
     if (mode === "sora") return [`${base}/videos`];
-    return [`${base}/videos/generations`, `${base}/videos`];
+    return [`${base}/videos/generations`, `${base}/video/generations`, `${base}/videos`];
 }
 
 function buildPollUrls(baseUrl: string, taskId: string): string[] {

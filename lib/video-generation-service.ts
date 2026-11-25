@@ -92,6 +92,20 @@ export function getVideoGenerationDailyUsage(): { used: number; limit: number } 
     return { used: readDailyCount(), limit: settings.maxDailyGenerations };
 }
 
+/** 从中转站的 /v1/models 拉取可选模型；沿用生图的通用模型列表代理。 */
+export async function fetchVideoGenerationModels(preset: Pick<VideoPreset, "apiKey" | "baseUrl">): Promise<string[]> {
+    const response = await fetch("/api/image-generation/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: preset.apiKey, baseUrl: preset.baseUrl }),
+    });
+    const data = await response.json().catch(() => ({})) as { models?: string[]; error?: string };
+    if (!response.ok || data.error) {
+        throw new Error(data.error || `模型列表请求失败 ${response.status}`);
+    }
+    return Array.isArray(data.models) ? data.models : [];
+}
+
 function blobToDataUrl(blob: Blob): Promise<string> {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
