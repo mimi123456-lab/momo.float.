@@ -320,6 +320,17 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
         onClick: () => setCurrentPage("imageGeneration"),
     };
 
+    const videoGenerationItem = SETTINGS_MENU.find(i => i.id === "videoGeneration")!;
+    const videoGenerationFeaturedItem: FeaturedCardItem = {
+        id: videoGenerationItem.id,
+        icon: videoGenerationItem.icon,
+        label: videoGenerationItem.label,
+        desc: videoGenerationItem.desc,
+        iconColor: videoGenerationItem.iconColor,
+        glassIcon: videoGenerationItem.glass,
+        onClick: () => setCurrentPage("videoGeneration"),
+    };
+
     const cloudItem = SETTINGS_MENU.find(i => i.id === "cloud")!;
     const cloudFeaturedItem: FeaturedCardItem = {
         id: cloudItem.id,
@@ -468,9 +479,12 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
                             </div>
                         </div>
                         <div className="settings-image-generation-section">
-                            <h3 className="settings-menu-section-title">Image Generation</h3>
+                            <h3 className="settings-menu-section-title">Media Generation</h3>
                             <div className="mt-[10px]">
                                 <FeaturedCard item={imageGenerationFeaturedItem} />
+                            </div>
+                            <div className="mt-[10px]">
+                                <FeaturedCard item={videoGenerationFeaturedItem} />
                             </div>
                         </div>
                         <div>
