@@ -582,6 +582,9 @@ export function StoryApp({ onClose }: StoryAppProps) {
   const [cssModalOpen, setCssModalOpen] = useState(false);
   const [quickStoryOpen, setQuickStoryOpen] = useState(false);
   const [quickStoryIndependent, setQuickStoryIndependent] = useState(false);
+  const [quickStoryScene, setQuickStoryScene] = useState("");
+  const [quickStoryTone, setQuickStoryTone] = useState("");
+  const [quickStoryOpening, setQuickStoryOpening] = useState("");
   const [playingVoiceSegmentId, setPlayingVoiceSegmentId] = useState<string | null>(null);
   const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
   const [voiceSequenceProgress, setVoiceSequenceProgress] = useState({ current: 0, total: 0 });
@@ -1524,12 +1527,21 @@ export function StoryApp({ onClose }: StoryAppProps) {
       independentStory: quickStoryIndependent,
       baseSession,
     });
-    const prompt = quickStoryIndependent
-      ? `这是一个独立的新剧情，不继承主线上下文。请由${storyDisplayName}自然开启一个全新的见面场景。`
-      : `当前剧情已经结束，请结合最近上下文，由${storyDisplayName}自然开启一段新的见面剧情。`;
+    const prompt = [
+      quickStoryIndependent
+        ? "这是一个独立的新剧情，不继承主线上下文。"
+        : "当前剧情已经结束，请结合最近上下文。",
+      quickStoryScene.trim() ? `场景/地点：${quickStoryScene.trim()}。` : "",
+      quickStoryTone.trim() ? `关系与基调：${quickStoryTone.trim()}。` : "",
+      quickStoryOpening.trim() ? `开场要求：${quickStoryOpening.trim()}。` : "",
+      `请由${storyDisplayName}自然开启这段新的见面剧情，不得替用户决定言行或反应。`,
+    ].filter(Boolean).join("\n");
     const next = updateStorySession(session.id, { autoStartPrompt: prompt, autoStartRequestedAt: now.toISOString() }) || session;
     setQuickStoryOpen(false);
     setQuickStoryIndependent(false);
+    setQuickStoryScene("");
+    setQuickStoryTone("");
+    setQuickStoryOpening("");
     activateStorySession(next);
   }
 
@@ -2887,6 +2899,18 @@ export function StoryApp({ onClose }: StoryAppProps) {
             <header><strong>快捷进入新剧情</strong><button type="button" onClick={() => setQuickStoryOpen(false)}><XMarkIcon width={16} /></button></header>
             <p className="story-quick-story-question">结束当前剧情？</p>
             <p className="story-settings-note">「结束剧情」会把这段剧情写入角色长期记忆并回到剧情主页；只有选「结束并新建」才会立刻进入下一段剧情。</p>
+            <label className="w-full flex flex-col gap-1">
+              <span className="menu-label">场景 / 地点</span>
+              <input className="ui-input w-full" value={quickStoryScene} onChange={(event) => setQuickStoryScene(event.target.value)} placeholder="例如：雨夜的便利店、他家的沙发" />
+            </label>
+            <label className="w-full flex flex-col gap-1">
+              <span className="menu-label">关系与基调</span>
+              <input className="ui-input w-full" value={quickStoryTone} onChange={(event) => setQuickStoryTone(event.target.value)} placeholder="例如：暧昧拉扯、久别重逢、轻松日常" />
+            </label>
+            <label className="w-full flex flex-col gap-1">
+              <span className="menu-label">开场要求</span>
+              <textarea className="ui-input w-full min-h-[64px]" value={quickStoryOpening} onChange={(event) => setQuickStoryOpening(event.target.value)} placeholder="例如：由他先开口，带着一点别扭的关心" />
+            </label>
             <label className="story-settings-toggle-row">
               <span><strong>独立剧情分线</strong></span>
               <input type="checkbox" checked={quickStoryIndependent} onChange={(event) => setQuickStoryIndependent(event.target.checked)} />

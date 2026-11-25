@@ -8,7 +8,7 @@ import { ChatRoom } from "./chat-room";
 import { MascotChatRoom } from "./mascot-chat-room";
 import { UserProfilePanel } from "./user-profile-panel";
 import { MessageCircle, Users, Aperture, UserRound } from "lucide-react";
-import { ChatSession, type ChatMessage, loadChatSessions, pushChatMessage, hydrateChatStorage, markChatSessionRead, setActiveChatSessionId } from "@/lib/chat-storage";
+import { ChatSession, type ChatMessage, loadChatSessions, pushChatMessage, hydrateChatStorage, markChatSessionRead, setActiveChatSessionId, CHAT_REQUEST_REPLY_EVENT } from "@/lib/chat-storage";
 import type { MomentPost } from "@/lib/moments-types";
 import { notifyMascotPageContext } from "@/lib/mascot-events";
 import { loadCharacters } from "@/lib/character-storage";
@@ -243,7 +243,9 @@ export const PhoneChatApp = memo(function PhoneChatApp({ onClose, initialSession
                 pushChatMessage({
                     sessionId: sess.id,
                     role: "user",
-                    content: "",
+                    content: sharePayload.together
+                        ? `（戴上耳机，想和你一起听《${sharePayload.title}》— ${sharePayload.artist}）`
+                        : "",
                     mediaType: "music_share",
                     mediaData: {
                         musicTitle: sharePayload.title,
@@ -251,6 +253,9 @@ export const PhoneChatApp = memo(function PhoneChatApp({ onClose, initialSession
                         label: `${sharePayload.title} - ${sharePayload.artist}`,
                     },
                 });
+                if (sharePayload.together) {
+                    window.dispatchEvent(new CustomEvent(CHAT_REQUEST_REPLY_EVENT, { detail: { sessionId: sess.id } }));
+                }
             } else {
                 const content = formatXiaohongshuShareForPrompt({
                     author: sharePayload.authorName,

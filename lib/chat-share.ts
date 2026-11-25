@@ -2,6 +2,8 @@ export type MusicChatSharePayload = {
     type: "music";
     title: string;
     artist: string;
+    /** 一起听：分享后角色会收到"正在和你一起听"的提示并回应。 */
+    together?: boolean;
 };
 
 export type XiaohongshuNoteChatSharePayload = {

@@ -333,6 +333,13 @@ export default function MusicPlayer() {
         }));
     }, [player.currentTrack]);
 
+    const openListenTogether = useCallback(() => {
+        if (!player.currentTrack) return;
+        window.dispatchEvent(new CustomEvent("open-mini-chat", {
+            detail: { share: { type: "music", title: player.currentTrack.title, artist: player.currentTrack.artist, together: true } },
+        }));
+    }, [player.currentTrack]);
+
     const openMiniChat = useCallback(() => {
         window.dispatchEvent(new CustomEvent("open-mini-chat"));
     }, []);
@@ -474,6 +481,11 @@ export default function MusicPlayer() {
                         <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                             <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
                             <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" /><line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+                        </svg>
+                    </button>
+                    <button className="music-player-ctrl-btn mp-top-btn" onClick={openListenTogether} title="和角色一起听">
+                        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M4 14v-2a8 8 0 0 1 16 0v2" /><rect x="2" y="14" width="4" height="6" rx="1.5" /><rect x="18" y="14" width="4" height="6" rx="1.5" />
                         </svg>
                     </button>
                 </div>
