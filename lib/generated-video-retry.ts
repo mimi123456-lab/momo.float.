@@ -90,7 +90,7 @@ export async function generateAndApplyChatGeneratedVideo(
                 videoGenerationStatus: "generated",
                 videoGenerationError: undefined,
                 videoGenerationNote: generated.motionReferenceSkipped
-                    ? "动作参考视频超过服务端体积上限，本次未参考动作"
+                    ? "动作参考未生效（参考视频需公网链接或体积超限）"
                     : undefined,
                 videoDurationSeconds: generated.durationSeconds,
             },

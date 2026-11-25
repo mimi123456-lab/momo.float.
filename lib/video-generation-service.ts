@@ -13,6 +13,7 @@ import {
 } from "./settings-storage";
 import type { VideoGenerationSettings, VideoPreset } from "./settings-types";
 import { pollVideoDirect, submitVideoDirect, type DirectSubmitInput } from "./video-generation-direct";
+import { canHostReferenceImages, toPublicImageUrl } from "./reference-image-hosting";
 
 const DAILY_COUNTER_KEY = "ai_phone_video_generation_daily_v1";
 const MAX_MOTION_REFERENCE_BYTES = 8 * 1024 * 1024;
@@ -234,12 +235,30 @@ async function prepareRequest(
             : "",
     ].filter(Boolean).join("\n\n");
 
+    // 火山/Seedance 官转只收公网 URL 参考图，base64 会被上游拒绝。
+    // 配置了图床时先换成公网链接；未配置则保持 base64，交给服务商决定。
+    const hosting = imageSettings.imageHosting;
+    let characterReferenceOut = firstFrame;
+    let userReferenceOut = usedUserReference && !attachUserToFrame ? userReferenceDataUrl : "";
+    if (canHostReferenceImages(hosting) && characterReferenceOut && !/^https?:\/\//i.test(characterReferenceOut)) {
+        try {
+            characterReferenceOut = await toPublicImageUrl(characterReferenceOut, "character-ref", hosting);
+            if (userReferenceOut) {
+                userReferenceOut = await toPublicImageUrl(userReferenceOut, "user-ref", hosting);
+            }
+        } catch (error) {
+            console.warn("[VideoGeneration] 参考图上传图床失败，回退 base64：", error);
+            characterReferenceOut = firstFrame;
+            userReferenceOut = usedUserReference && !attachUserToFrame ? userReferenceDataUrl : "";
+        }
+    }
+
     return {
         settings,
         preset,
         prompt: preset.extraPrompt.trim() ? `${prompt}\n\n${preset.extraPrompt.trim()}` : prompt,
-        characterReferenceDataUrl: firstFrame,
-        userReferenceDataUrl: usedUserReference && !attachUserToFrame ? userReferenceDataUrl : "",
+        characterReferenceDataUrl: characterReferenceOut,
+        userReferenceDataUrl: userReferenceOut,
         motionReference,
         usedUserReference,
         usedMotionReference: Boolean(motionReference),
@@ -422,10 +441,11 @@ export async function generateVideoFromConfiguredApi(params: {
     try {
         submitState = await requestServer(videoApiRequestBody(prepared), params.signal);
     } catch (error) {
-        // 动作参考视频让请求体超出服务端上限（413）时，去掉参考重试一次，
+        // 动作参考让请求体超限（413）或被服务商要求公网链接时，去掉参考重试一次，
         // 至少保证能出片；气泡会注明动作参考没有生效。
-        const tooLarge = error instanceof VideoGenerationFailure && /413|请求体过大/.test(error.message);
-        if (!tooLarge || !prepared.motionReference) throw error;
+        const retryable = error instanceof VideoGenerationFailure
+            && /413|请求体过大|公网 ?URL|base64|不支持本地文件/i.test(error.message);
+        if (!retryable || !prepared.motionReference) throw error;
         console.warn("[VideoGeneration] 参考视频导致请求体过大，改为不带动作参考重试");
         submitState = await requestServer(
             videoApiRequestBody({ ...prepared, motionReference: "", usedMotionReference: false }),
@@ -433,14 +453,24 @@ export async function generateVideoFromConfiguredApi(params: {
         );
         motionReferenceSkipped = true;
     }
-    // 直连时 413 会以 failed 状态返回（不抛错），同样去掉动作参考重试一次。
-    if (submitState.status === "failed" && prepared.motionReference && /413|too large|请求体过大/i.test(submitState.error || "")) {
-        console.warn("[VideoGeneration] 中转站拒绝超大请求，改为不带动作参考重试");
+    // 直连时同样的错误会以 failed 状态返回（不抛错），同样去掉动作参考重试一次。
+    if (
+        submitState.status === "failed"
+        && prepared.motionReference
+        && /413|too large|请求体过大|公网 ?URL|base64|不支持本地文件/i.test(submitState.error || "")
+    ) {
+        console.warn("[VideoGeneration] 动作参考不被接受，改为不带动作参考重试");
         submitState = await requestServer(
             videoApiRequestBody({ ...prepared, motionReference: "", usedMotionReference: false }),
             params.signal,
         );
         motionReferenceSkipped = true;
+    }
+    if (submitState.status === "failed" && /公网 ?URL|base64|不支持本地文件/i.test(submitState.error || "")) {
+        throw new VideoGenerationFailure(
+            "FAILED",
+            "该服务商的参考图只接受公网 URL：请到「图像生成 API → 图床」配置 ImgBB 后重试",
+        );
     }
     let videoUrl = "";
     if (submitState.status === "succeeded" && submitState.videoUrl) {

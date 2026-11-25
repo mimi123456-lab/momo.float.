@@ -206,6 +206,7 @@ export function VideoGenerationSettings() {
                     <span className="settings-tools-menu-copy">
                         <span className="menu-label appearance-menu-item-label">同时使用用户参考图</span>
                         <span className="menu-desc settings-tools-menu-desc">用户参考图按该角色绑定的用户身份自动匹配（配置绑定 → 用户身份），缺图时会报错。</span>
+                        <span className="menu-desc settings-tools-menu-desc" style={{ opacity: 0.75 }}>火山 / Seedance 官转只接受公网 URL 参考图：请先在「图像生成 API → 图床」配置 ImgBB，会自动把参考图换成链接再发送。</span>
                     </span>
                     <span className="menu-right settings-tools-menu-toggle">
                         <Toggle
