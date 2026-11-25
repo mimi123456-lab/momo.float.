@@ -1269,15 +1269,13 @@ export function ChatSettingsPanel({
                             <ChatInfoIcon icon={Code} color={BINDING_ACCENTS.preset} />
                             <div className="menu-label-group">
                                 <span className="menu-label">原生状态栏</span>
-                                <span className="menu-desc">{statusPresetSupported ? "状态值与内心的默认输出（关闭后整块从提示词移除）" : "当前预设未声明状态区宏，仅默认预设支持"}</span>
+                                <span className="menu-desc">{statusPresetSupported ? "状态值与内心的默认输出（关闭后整块从提示词移除）" : "当前预设未声明状态区宏——开关已解锁，AI 可能需要额外契约才能稳定输出状态"}</span>
                             </div>
                             <div className="menu-right">
                                 {statusUsesGlobal && <span className="menu-desc mr-2">跟随全局</span>}
                                 <Toggle
                                     checked={statusRegion.mode === "native"}
-                                    disabled={!statusPresetSupported}
                                     onChange={c => {
-                                        if (!statusPresetSupported) return;
                                         saveStatusRegion({
                                             ...statusRegion,
                                             mode: c ? "native" : (statusRegion.contract.trim() && statusRegion.renderHtml.trim() ? "custom" : "off"),
@@ -1286,7 +1284,7 @@ export function ChatSettingsPanel({
                                 />
                             </div>
                         </div>
-                        {statusPresetSupported && statusRegion.mode !== "native" && (
+                        {statusRegion.mode !== "native" && (
                             <div className="menu-item cursor-pointer" onClick={openStatusRegionDialog}>
                                 <ChatInfoIcon icon={Sparkles} color={BINDING_ACCENTS.preset} />
                                 <div className="menu-label-group">
