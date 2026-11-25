@@ -14,6 +14,61 @@ export type InspectAppId =
     | "music"
     | "notes";
 
+/** 查岗实时画面要渲染的“手机屏幕”。 */
+export type InspectScreen =
+    | "chat-list"
+    | "chat-thread"
+    | "moments"
+    | "shopping"
+    | "sms"
+    | "sms-thread"
+    | "calls"
+    | "photos"
+    | "home";
+
+export type InspectSnapshotRow = {
+    id: string;
+    title: string;
+    subtitle?: string;
+    trailing?: string;
+    /** 被手指指着的那一行 */
+    focus?: boolean;
+    /** 被改动的痕迹（高亮显示） */
+    changed?: boolean;
+    avatarUrl?: string;
+    avatarText?: string;
+};
+
+export type InspectSnapshotMessage = {
+    from: "user" | "character";
+    text: string;
+    focus?: boolean;
+};
+
+/** 真实数据快照：查岗时展示的就是用户手机里此刻的真实内容。 */
+export type InspectSnapshot = {
+    screen: InspectScreen;
+    title: string;
+    subtitle?: string;
+    rows?: InspectSnapshotRow[];
+    messages?: InspectSnapshotMessage[];
+    /** 角色手指落点（行 id），缺省指向被 focus 的那行 */
+    fingerRowId?: string;
+    /** 指尖旁的小气泡，如「备注改成“小猪”」 */
+    callout?: string;
+    emptyHint?: string;
+};
+
+/** 角色这次动作的真实载荷（真读、真改）。 */
+export type InspectActionType =
+    | "view"
+    | "open-chat"
+    | "change-remark"
+    | "post-moment"
+    | "place-order";
+
+export type InspectEmotion = "calm" | "curious" | "jealous" | "sad" | "angry";
+
 export type InspectLog = {
     id: string;
     characterId: string;
@@ -25,11 +80,21 @@ export type InspectLog = {
     summary: string;           // 一句话：翻了什么 / 改了什么
     detail?: string;           // 更细的过程，可多行
     reaction?: "confront" | "ignore"; // 用户处理方式
+    /** 具体动作类型 */
+    action?: InspectActionType;
+    /** 真实目标 id（会话 / 动态 / 订单 / 短信线程） */
+    targetId?: string;
+    /** 这一步在真机上的画面 */
+    snapshot?: InspectSnapshot;
+    /** TA 看完这一条时的心情 */
+    emotion?: InspectEmotion;
 };
 
 export type InspectSettings = {
     enabled: boolean;
     allowedAppIds: InspectAppId[];
+    /** 强制查岗：TA 会自己隔一会儿来翻一次，无视上面的权限 */
+    forceMode?: boolean;
 };
 
 export const INSPECT_APP_LABELS: Record<InspectAppId, string> = {
@@ -92,6 +157,7 @@ export function loadInspectSettings(): InspectSettings {
         return {
             enabled: parsed.enabled !== false,
             allowedAppIds: allowed,
+            forceMode: parsed.forceMode === true,
         };
     } catch {
         return getDefaultInspectSettings();
@@ -103,7 +169,57 @@ export function saveInspectSettings(settings: InspectSettings): void {
     const allowed = Array.isArray(settings.allowedAppIds)
         ? Array.from(new Set(settings.allowedAppIds.filter(isInspectAppId)))
         : [];
-    kvSet(SETTINGS_KEY, JSON.stringify({ enabled: settings.enabled !== false, allowedAppIds: allowed }));
+    kvSet(SETTINGS_KEY, JSON.stringify({
+        enabled: settings.enabled !== false,
+        allowedAppIds: allowed,
+        forceMode: settings.forceMode === true,
+    }));
+}
+
+const SCREENS: InspectScreen[] = ["chat-list", "chat-thread", "moments", "shopping", "sms", "sms-thread", "calls", "photos", "home"];
+const ACTIONS: InspectActionType[] = ["view", "open-chat", "change-remark", "post-moment", "place-order"];
+const EMOTIONS: InspectEmotion[] = ["calm", "curious", "jealous", "sad", "angry"];
+
+function normalizeSnapshot(value: unknown): InspectSnapshot | undefined {
+    if (!value || typeof value !== "object") return undefined;
+    const raw = value as Partial<InspectSnapshot>;
+    if (!raw.screen || !SCREENS.includes(raw.screen)) return undefined;
+    if (typeof raw.title !== "string") return undefined;
+    const rows = Array.isArray(raw.rows)
+        ? raw.rows.flatMap((item): InspectSnapshotRow[] => {
+            if (!item || typeof item !== "object") return [];
+            const row = item as Partial<InspectSnapshotRow>;
+            if (typeof row.id !== "string" || typeof row.title !== "string") return [];
+            return [{
+                id: row.id,
+                title: row.title,
+                subtitle: typeof row.subtitle === "string" ? row.subtitle : undefined,
+                trailing: typeof row.trailing === "string" ? row.trailing : undefined,
+                focus: row.focus === true,
+                changed: row.changed === true,
+                avatarUrl: typeof row.avatarUrl === "string" ? row.avatarUrl : undefined,
+                avatarText: typeof row.avatarText === "string" ? row.avatarText : undefined,
+            }];
+        }).slice(0, 40)
+        : undefined;
+    const messages = Array.isArray(raw.messages)
+        ? raw.messages.flatMap((item): InspectSnapshotMessage[] => {
+            if (!item || typeof item !== "object") return [];
+            const msg = item as Partial<InspectSnapshotMessage>;
+            if (typeof msg.text !== "string") return [];
+            return [{ from: msg.from === "character" ? "character" : "user", text: msg.text, focus: msg.focus === true }];
+        }).slice(0, 40)
+        : undefined;
+    return {
+        screen: raw.screen,
+        title: raw.title,
+        subtitle: typeof raw.subtitle === "string" ? raw.subtitle : undefined,
+        rows,
+        messages,
+        fingerRowId: typeof raw.fingerRowId === "string" ? raw.fingerRowId : undefined,
+        callout: typeof raw.callout === "string" ? raw.callout : undefined,
+        emptyHint: typeof raw.emptyHint === "string" ? raw.emptyHint : undefined,
+    };
 }
 
 function normalizeLog(value: unknown): InspectLog | null {
@@ -126,6 +242,10 @@ function normalizeLog(value: unknown): InspectLog | null {
         summary: raw.summary,
         detail: typeof raw.detail === "string" && raw.detail.trim() ? raw.detail : undefined,
         reaction,
+        action: raw.action && ACTIONS.includes(raw.action) ? raw.action : undefined,
+        targetId: typeof raw.targetId === "string" ? raw.targetId : undefined,
+        snapshot: normalizeSnapshot(raw.snapshot),
+        emotion: raw.emotion && EMOTIONS.includes(raw.emotion) ? raw.emotion : undefined,
     };
 }
 

@@ -1,18 +1,31 @@
 // lib/inspect-engine.ts
 // 让角色生成一次「查岗」行动计划：翻了哪些 App、改了什么。
+// 这里只产出「意图」；真正读到的数据、真正落地的改动在 inspect-executor.ts 执行。
 
 import { sendLLMRequest } from "@/lib/chat-engine";
 import type { LLMMessage } from "@/lib/llm-prompt-assembler";
 import { loadApiConfigs, loadBindingConfig } from "@/lib/settings-storage";
-import { INSPECT_APP_LABELS, type InspectAppId } from "@/lib/inspect-storage";
+import {
+    INSPECT_APP_LABELS,
+    type InspectActionType,
+    type InspectAppId,
+    type InspectEmotion,
+} from "@/lib/inspect-storage";
 
 export { INSPECT_APP_LABELS };
 
 export type InspectPlanAction = {
     appId: InspectAppId;
     kind: "view" | "change";
+    /** 具体动作；缺省时按 appId + kind 推断 */
+    action?: InspectActionType;
+    /** 目标提示：会话名 / 商品名 / 短信联系人，用来在真实数据里定位 */
+    target?: string;
+    /** 改动内容：新备注 / 朋友圈正文 */
+    text?: string;
     summary: string;
     detail?: string;
+    emotion?: InspectEmotion;
 };
 
 export type GenerateInspectionPlanInput = {
@@ -22,6 +35,8 @@ export type GenerateInspectionPlanInput = {
     allowedAppIds: InspectAppId[];
     userName?: string;
     recentChat?: string;
+    /** 用户主动把手机递给 TA：允许直接翻，不必先找理由 */
+    handedOver?: boolean;
 };
 
 export type GenerateInspectionPlanResult = {
@@ -38,28 +53,44 @@ function buildSystemPrompt(input: GenerateInspectionPlanInput): string {
     const recentChat = input.recentChat?.trim()
         ? `\n最近和${userName}的聊天片段（可作参考，不要逐字复述）：\n${input.recentChat.trim()}`
         : "";
+    const mode = input.handedOver
+        ? `${userName}刚把手机塞到你手里，说“喏，你看吧”。你可以放心地翻，不用装作不经意。`
+        : `你趁${userName}不注意，偷偷拿起了${userName}的手机。`;
 
     return [
         `你是${input.characterName}。以下是你的人设全文：`,
         input.persona?.trim() || "（未填写人设，请按普通恋人的口吻行动）",
         "",
-        `你现在在偷偷翻看${userName}的手机。按你吃醋、担心或好奇的程度，从允许的 App 里挑 2-4 个动作。`,
-        "只能做合理的小动作：看聊天、看朋友圈、改微信备注、发一条朋友圈或论坛、拿手机下单买东西、翻相册、看短信或通话记录、看歌单。",
-        "每个动作要么是查看（view），要么是改动（change）。summary 用一句话说清翻了什么或改了什么，detail 写更细的过程（可多行）。",
+        mode,
+        `按你此时此刻真实的情绪（好奇、吃醋、不安、想确认），从允许的 App 里挑 2-4 个动作。`,
+        "动作要像真人翻手机：先看某个具体的人/内容，再有反应；不要笼统地说“翻了聊天”。",
+        "",
+        "可选动作：",
+        "- action=open-chat：打开某个聊天（target 写聊天对象的名字）",
+        "- action=change-remark：给某个联系人改备注（target 写对象名字，text 写新备注，要符合你的占有欲/小情绪）",
+        "- action=post-moment：发一条朋友圈（text 写正文，不超过 60 字，像真人随手发的）",
+        "- action=place-order：用${userName}的账号下单（target 写想买的东西）",
+        "- action=view：只是看看（朋友圈、订单、短信、通话记录、相册）",
         "",
         "允许的 App：",
         allowedList,
         recentChat,
         "",
+        "emotion 只能取 calm / curious / jealous / sad / angry，表示你看到这条内容时的心情。",
+        "summary 用一句话说清你做了什么（用“我”的口吻）。detail 可写你心里想的（1-2 句，口语，不要括号说明）。",
+        "",
         "只输出一个 JSON 数组，不要 markdown 代码围栏，不要任何解释。元素格式：",
-        '{"appId":"chat","kind":"view","summary":"翻了用户和闺蜜的聊天","detail":"..."}',
-        "appId 必须取自允许列表；kind 只能是 view 或 change。",
+        '{"appId":"chat","kind":"view","action":"open-chat","target":"闺蜜","summary":"我点开了你和闺蜜的聊天","detail":"往上翻了几屏…","emotion":"jealous"}',
+        "appId 必须取自允许列表；kind 只能是 view 或 change；action 取上面五种之一。",
     ].join("\n");
 }
 
 function isInspectAppId(value: unknown): value is InspectAppId {
     return typeof value === "string" && Object.prototype.hasOwnProperty.call(INSPECT_APP_LABELS, value);
 }
+
+const ACTIONS: InspectActionType[] = ["view", "open-chat", "change-remark", "post-moment", "place-order"];
+const EMOTIONS: InspectEmotion[] = ["calm", "curious", "jealous", "sad", "angry"];
 
 function normalizeAction(value: unknown, allowedAppIds: InspectAppId[]): InspectPlanAction | null {
     if (!value || typeof value !== "object") return null;
@@ -68,11 +99,21 @@ function normalizeAction(value: unknown, allowedAppIds: InspectAppId[]): Inspect
     if (!allowedAppIds.includes(raw.appId)) return null;
     if (raw.kind !== "view" && raw.kind !== "change") return null;
     if (typeof raw.summary !== "string" || !raw.summary.trim()) return null;
+    const action = typeof raw.action === "string" && ACTIONS.includes(raw.action as InspectActionType)
+        ? raw.action as InspectActionType
+        : undefined;
+    const emotion = typeof raw.emotion === "string" && EMOTIONS.includes(raw.emotion as InspectEmotion)
+        ? raw.emotion as InspectEmotion
+        : undefined;
     return {
         appId: raw.appId,
         kind: raw.kind,
+        action,
+        target: typeof raw.target === "string" && raw.target.trim() ? raw.target.trim() : undefined,
+        text: typeof raw.text === "string" && raw.text.trim() ? raw.text.trim() : undefined,
         summary: raw.summary.trim(),
         detail: typeof raw.detail === "string" && raw.detail.trim() ? raw.detail.trim() : undefined,
+        emotion,
     };
 }
 
@@ -99,11 +140,26 @@ function parsePlan(raw: string, allowedAppIds: InspectAppId[]): InspectPlanActio
 }
 
 function buildFallbackPlan(allowedAppIds: InspectAppId[]): InspectPlanAction[] {
-    return allowedAppIds.slice(0, 2).map(appId => ({
-        appId,
-        kind: "view" as const,
-        summary: `翻了你的${INSPECT_APP_LABELS[appId]}`,
-    }));
+    const picks = allowedAppIds.slice(0, 2);
+    return picks.map((appId, index) => {
+        if (appId === "chat") {
+            return {
+                appId,
+                kind: "view" as const,
+                action: "open-chat" as const,
+                summary: "我点开你的微信，从头往下翻会话",
+                detail: index === 0 ? "手指停在最上面那个人的头像上。" : undefined,
+                emotion: "curious" as const,
+            };
+        }
+        return {
+            appId,
+            kind: "view" as const,
+            action: "view" as const,
+            summary: `我翻了翻你的${INSPECT_APP_LABELS[appId]}`,
+            emotion: "curious" as const,
+        };
+    });
 }
 
 export async function generateInspectionPlan(

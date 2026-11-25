@@ -1,14 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { AppCustomCSS } from "@/components/ui/app-custom-css";
 import { Toggle } from "@/components/ui/form";
 import { PageShell } from "@/components/ui/page-shell";
 import { loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
-import { createOrGetSession, pushChatMessage } from "@/lib/chat-storage";
+import { createOrGetSession, loadChatSessions, pushChatMessage } from "@/lib/chat-storage";
+import { resolveUserIdentity } from "@/lib/settings-storage";
 import { generateInspectionPlan } from "@/lib/inspect-engine";
+import { executeInspectAction } from "@/lib/inspect-executor";
+import { renderInspectScreenshot } from "@/lib/inspect-screenshot";
 import {
     INSPECT_APP_IDS,
     INSPECT_APP_LABELS,
@@ -21,7 +24,9 @@ import {
     type InspectAppId,
     type InspectLog,
     type InspectSettings,
+    type InspectSnapshot,
 } from "@/lib/inspect-storage";
+import { InspectLiveScreen } from "./inspect-live-screen";
 
 const ACCENT = "#5f7f76";
 const ACCENT_DEEP = "#436158";
@@ -32,6 +37,18 @@ const TEXT_FAINT = "#95a29e";
 const CARD_BG = "rgba(255, 255, 255, 0.74)";
 const CARD_BORDER = "rgba(95, 127, 118, 0.18)";
 const DIVIDER = "rgba(95, 127, 118, 0.12)";
+
+const FIRST_AUTO_DELAY_MS = 6000;
+const AUTO_REPEAT_MS = 120000;
+
+type WatchingState = {
+    characterId: string;
+    characterName: string;
+    logs: InspectLog[];
+    index: number;
+    finished: boolean;
+    silent?: boolean;
+};
 
 function cardStyle(extra?: CSSProperties): CSSProperties {
     return {
@@ -69,15 +86,45 @@ function formatLogTime(iso: string): string {
 }
 
 function formatInspectRecord(log: InspectLog): string {
-    const action = log.kind === "view" ? "翻了你的" : "动了你的";
     const detail = log.detail ? `\n${log.detail}` : "";
-    return `〔查岗实录〕TA ${action}${log.appLabel}：${log.summary}${detail}`;
+    let shot = "";
+    if (log.snapshot?.screen === "chat-thread" && log.snapshot.messages?.length) {
+        shot = "\n" + log.snapshot.messages.slice(-4)
+            .map(message => `${message.from === "user" ? "你" : log.snapshot?.title || "TA"}：${message.text}`)
+            .join("\n");
+    } else if (log.snapshot?.rows?.length) {
+        shot = "\n" + log.snapshot.rows.slice(0, 3)
+            .map(row => `· ${row.title}${row.subtitle ? `：${row.subtitle}` : ""}`)
+            .join("\n");
+    }
+    return `〔查岗实录〕${log.appLabel} · ${log.summary}${detail}${shot}`;
 }
 
 function syncInspectToChat(characterId: string, text: string) {
     const session = createOrGetSession(characterId);
     pushChatMessage({ sessionId: session.id, role: "system", content: text, mediaType: "tool_notice" });
     return session;
+}
+
+function pickDefaultCharacterId(characters: Character[]): string {
+    if (characters.length === 0) return "";
+    const sessions = loadChatSessions()
+        .filter(session => !session.isGroup)
+        .slice()
+        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+    for (const session of sessions) {
+        const hit = characters.find(character => character.id === session.contactId);
+        if (hit) return hit.id;
+    }
+    return characters[0].id;
+}
+
+function idleSnapshot(characterName: string): InspectSnapshot {
+    return {
+        screen: "home",
+        title: "手机",
+        emptyHint: `${characterName} 正握着你的手机`,
+    };
 }
 
 function SectionLabel({ children }: { children: ReactNode }) {
@@ -102,22 +149,26 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
     const [selectedCharacterId, setSelectedCharacterId] = useState("");
     const [generating, setGenerating] = useState(false);
     const [error, setError] = useState("");
-    const [forceMode, setForceMode] = useState(false);
-    const [watching, setWatching] = useState<{
-        characterId: string;
-        characterName: string;
-        logs: InspectLog[];
-        index: number;
-        finished: boolean;
-    } | null>(null);
+    const [forceMode, setForceMode] = useState(() => loadInspectSettings().forceMode === true);
+    const [watching, setWatching] = useState<WatchingState | null>(null);
     const [chatHintSessionId, setChatHintSessionId] = useState<string | null>(null);
+
     const syncedRef = useRef(false);
+    const autoDelayRef = useRef(FIRST_AUTO_DELAY_MS);
+    const userNameRef = useRef("你");
 
     useEffect(() => {
         const chars = loadCharacters();
         setCharacters(chars);
-        setSelectedCharacterId(prev => prev || chars[0]?.id || "");
+        setSelectedCharacterId(prev => (prev && chars.some(item => item.id === prev) ? prev : pickDefaultCharacterId(chars)));
         setLogs(loadInspectLogs());
+        userNameRef.current = resolveUserIdentity()?.name || "你";
+        const timers = [500, 1600].map(ms => window.setTimeout(() => {
+            const next = loadCharacters();
+            setCharacters(next);
+            setSelectedCharacterId(prev => (prev && next.some(item => item.id === prev) ? prev : pickDefaultCharacterId(next)));
+        }, ms));
+        return () => timers.forEach(timer => window.clearTimeout(timer));
     }, []);
 
     const persistSettings = (next: InspectSettings) => {
@@ -136,65 +187,107 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
         persistSettings({ ...settings, allowedAppIds });
     };
 
-    const handleGenerate = async () => {
-        const character = characters.find(item => item.id === selectedCharacterId);
+    const toggleForceMode = (next: boolean) => {
+        setForceMode(next);
+        persistSettings({ ...settings, forceMode: next });
+        autoDelayRef.current = FIRST_AUTO_DELAY_MS;
+    };
+
+    const selectedCharacter = characters.find(item => item.id === selectedCharacterId)
+        || characters[0]
+        || null;
+
+    const runInspection = useCallback(async (options?: { handedOver?: boolean; auto?: boolean }) => {
+        const character = characters.find(item => item.id === selectedCharacterId) || characters[0];
         if (!character) {
-            setError("请先选择一个角色");
+            setError("还没有角色，先去创建一个吧");
             return;
         }
-        if (!forceMode) {
-            if (!settings.enabled) {
-                setError("查岗已关闭，请先打开总开关");
-                return;
-            }
-            if (settings.allowedAppIds.length === 0) {
-                setError("请至少允许一个 App");
-                return;
+        if (!options?.handedOver && !options?.auto) {
+            if (!forceMode) {
+                if (!settings.enabled) {
+                    setError("查岗已关闭，请先打开总开关");
+                    return;
+                }
+                if (settings.allowedAppIds.length === 0) {
+                    setError("请至少允许一个 App");
+                    return;
+                }
             }
         }
         setGenerating(true);
         setError("");
         try {
+            const recentChatSession = loadChatSessions()
+                .filter(session => session.contactId === character.id && !session.isGroup)[0];
+            const recentChat = recentChatSession?.lastMessagePreview || undefined;
             const plan = await generateInspectionPlan({
                 characterId: character.id,
                 characterName: character.name,
                 persona: character.persona || character.personality || "",
                 allowedAppIds: forceMode ? [...INSPECT_APP_IDS] : settings.allowedAppIds,
+                userName: userNameRef.current,
+                recentChat,
+                handedOver: options?.handedOver === true,
             });
             if (plan.logs.length === 0) {
-                setError("TA 这次没有翻到什么");
+                if (!options?.auto) setError("TA 这次没翻到什么");
                 return;
             }
-            const created = plan.logs.map(action => addInspectLog({
+            const created = plan.logs.map(action => addInspectLog(executeInspectAction({
+                action,
                 characterId: character.id,
                 characterName: character.name,
-                appId: action.appId,
-                appLabel: INSPECT_APP_LABELS[action.appId],
-                kind: action.kind,
-                summary: action.summary,
-                detail: action.detail,
-            }));
+                userName: userNameRef.current,
+            })));
             setLogs(loadInspectLogs());
             syncedRef.current = false;
             setChatHintSessionId(null);
-            setWatching({ characterId: character.id, characterName: character.name, logs: created, index: 0, finished: false });
+            setWatching({
+                characterId: character.id,
+                characterName: character.name,
+                logs: created,
+                index: 0,
+                finished: false,
+            });
+            autoDelayRef.current = AUTO_REPEAT_MS;
         } catch (err) {
-            setError(err instanceof Error ? err.message : "查岗失败，请稍后再试");
+            if (!options?.auto) setError(err instanceof Error ? err.message : "查岗失败，请稍后再试");
         } finally {
             setGenerating(false);
         }
-    };
+    }, [characters, selectedCharacterId, forceMode, settings]);
 
-    // 实时播放：一条一条翻给你看
+    // 实时回放：一条一条翻，画面同步
     useEffect(() => {
         if (!watching || watching.finished) return;
-        const delay = watching.index === 0 ? 900 : 2000;
+        const delay = watching.index === 0 ? 1100 : 2300;
         const timer = window.setTimeout(() => {
             const nextIndex = watching.index + 1;
             if (nextIndex >= watching.logs.length) {
-                if (!syncedRef.current) {
+                if (!watching.silent && !syncedRef.current) {
                     syncedRef.current = true;
-                    const session = syncInspectToChat(watching.characterId, watching.logs.map(formatInspectRecord).join("\n\n"));
+                    const bothered = watching.logs.some(log => log.emotion === "jealous" || log.emotion === "angry" || log.emotion === "sad");
+                    const head = bothered
+                        ? `〔查岗实录〕${watching.characterName}翻完你的手机，脸色不太对。\n`
+                        : `〔查岗实录〕${watching.characterName}翻完了你的手机。\n`;
+                    const session = syncInspectToChat(
+                        watching.characterId,
+                        head + watching.logs.map(formatInspectRecord).join("\n"),
+                    );
+                    // TA 顺手截了张图，丢进聊天里
+                    const shotLog = [...watching.logs].reverse().find(log => log.snapshot?.screen === "chat-thread" && (log.snapshot.messages?.length ?? 0) > 0)
+                        || [...watching.logs].reverse().find(log => log.snapshot);
+                    const dataUrl = shotLog?.snapshot ? renderInspectScreenshot(shotLog.snapshot) : null;
+                    if (dataUrl) {
+                        pushChatMessage({
+                            sessionId: session.id,
+                            role: "assistant",
+                            content: "",
+                            mediaType: "image",
+                            mediaUrl: dataUrl,
+                        });
+                    }
                     window.dispatchEvent(new CustomEvent("ai-chat-request-reply", { detail: { sessionId: session.id } }));
                     setChatHintSessionId(session.id);
                 }
@@ -205,6 +298,17 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
         }, delay);
         return () => window.clearTimeout(timer);
     }, [watching]);
+
+    // 强制查岗：TA 自己会隔一会儿来翻一次（看完这一轮后也会再等下一轮）
+    const watchingActive = Boolean(watching && !watching.finished);
+    useEffect(() => {
+        if (!forceMode || characters.length === 0) return;
+        if (watchingActive || generating) return;
+        const timer = window.setTimeout(() => {
+            void runInspection({ auto: true });
+        }, autoDelayRef.current);
+        return () => window.clearTimeout(timer);
+    }, [forceMode, characters.length, watchingActive, generating, runInspection]);
 
     const interruptWatch = () => {
         const state = watching;
@@ -224,17 +328,15 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
         if (!chatHintSessionId) return;
         window.dispatchEvent(new CustomEvent("open-app", { detail: { appId: "chat", sessionId: chatHintSessionId } }));
         setChatHintSessionId(null);
+        setWatching(null);
     };
 
     const handleConfront = (log: InspectLog) => {
         setInspectLogReaction(log.id, "confront");
         setLogs(loadInspectLogs());
-        const action = log.kind === "view" ? `翻了你的${log.appLabel}` : `动了你的${log.appLabel}`;
-        const text = `〔我当面问 TA〕我看到了你刚才翻我手机，${action}：${log.summary}。我可以当面问你吗？`;
+        const text = `〔我当面问 TA〕我看见你刚才翻我手机了。${log.appLabel}：${log.summary}。你想问什么，直接问我。`;
         const session = syncInspectToChat(log.characterId, text);
-        if (typeof window !== "undefined") {
-            window.dispatchEvent(new CustomEvent("ai-chat-request-reply", { detail: { sessionId: session.id } }));
-        }
+        window.dispatchEvent(new CustomEvent("ai-chat-request-reply", { detail: { sessionId: session.id } }));
         onNotice?.("已当面质问 TA");
     };
 
@@ -251,6 +353,9 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
     };
 
     const sortedLogs = [...logs].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    const currentSnapshot = watching && watching.index > 0
+        ? watching.logs[Math.min(watching.index, watching.logs.length) - 1]?.snapshot
+        : undefined;
 
     return (
         <div
@@ -292,7 +397,88 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
                     })}>
                         <div style={{ fontSize: 12.6, fontWeight: 600, color: ACCENT_DEEP }}>查岗说明</div>
                         <div style={{ marginTop: 7, fontSize: 12, lineHeight: 1.65, color: TEXT_SUB }}>
-                            TA 会像翻你手机一样查看你允许的 App；每次查看或改动都会以录屏记录同步到聊天。
+                            TA 会拿起你的手机，实时翻给你看——你看到的画面就是 TA 此刻真在看的：真的微信会话、真的朋友圈、真的订单。
+                            改备注、发朋友圈、下单都会真的写进你的手机。
+                        </div>
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                        <SectionLabel>现在查岗</SectionLabel>
+                        <div style={cardStyle()}>
+                            <div style={{ fontSize: 11.5, color: TEXT_SUB, marginBottom: 8 }}>以谁的身份翻看</div>
+                            <select
+                                className="ui-select"
+                                value={selectedCharacter?.id || ""}
+                                onChange={(event) => setSelectedCharacterId(event.target.value)}
+                                disabled={characters.length === 0}
+                            >
+                                {characters.length === 0 ? (
+                                    <option value="">还没有角色</option>
+                                ) : characters.map(character => (
+                                    <option key={character.id} value={character.id}>{character.name}</option>
+                                ))}
+                            </select>
+
+                            <button
+                                type="button"
+                                className="ui-btn"
+                                onClick={() => void runInspection({ handedOver: true })}
+                                disabled={generating || characters.length === 0 || Boolean(watching)}
+                                style={{
+                                    width: "100%",
+                                    marginTop: 12,
+                                    background: ACCENT,
+                                    color: "#fff",
+                                    boxShadow: "0 4px 14px rgba(95, 127, 118, 0.28)",
+                                }}
+                            >
+                                {generating ? "TA 正在拿起手机…" : "把手机递给 TA"}
+                            </button>
+
+                            <div style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                gap: 12,
+                                marginTop: 12,
+                                paddingTop: 12,
+                                borderTop: `1px solid ${DIVIDER}`,
+                            }}>
+                                <div style={{ minWidth: 0 }}>
+                                    <div style={{ fontSize: 12.4, fontWeight: 600, color: TEXT_MAIN }}>强制查岗</div>
+                                    <div style={{ marginTop: 3, fontSize: 11, color: TEXT_FAINT }}>
+                                        打开后 TA 会自己隔一会儿来翻一次，不用你点
+                                    </div>
+                                </div>
+                                <Toggle checked={forceMode} onChange={toggleForceMode} />
+                            </div>
+                            {forceMode ? (
+                                <div style={{
+                                    marginTop: 10,
+                                    padding: "8px 10px",
+                                    borderRadius: 10,
+                                    background: "rgba(95, 127, 118, 0.10)",
+                                    fontSize: 11.5,
+                                    lineHeight: 1.55,
+                                    color: ACCENT_DEEP,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 8,
+                                }}>
+                                    <span style={{
+                                        width: 6,
+                                        height: 6,
+                                        borderRadius: "50%",
+                                        background: ACCENT,
+                                        animation: "inspect-breathe 1.8s ease-in-out infinite",
+                                    }} />
+                                    TA 随时可能自己拿起你的手机…
+                                    <style>{`@keyframes inspect-breathe { 0%,100% { opacity: .3; transform: scale(.8); } 50% { opacity: 1; transform: scale(1.15); } }`}</style>
+                                </div>
+                            ) : null}
+                            {error ? (
+                                <div style={{ marginTop: 8, fontSize: 11.5, color: "#b4544d", lineHeight: 1.5 }}>{error}</div>
+                            ) : null}
                         </div>
                     </div>
 
@@ -341,64 +527,12 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
                     </div>
 
                     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                        <SectionLabel>现在查岗</SectionLabel>
-                        <div style={cardStyle()}>
-                            <div style={{ fontSize: 11.5, color: TEXT_SUB, marginBottom: 8 }}>选择以谁的身份翻看</div>
-                            <select
-                                className="ui-select"
-                                value={selectedCharacterId}
-                                onChange={(event) => setSelectedCharacterId(event.target.value)}
-                                disabled={characters.length === 0}
-                            >
-                                {characters.length === 0 ? (
-                                    <option value="">还没有角色</option>
-                                ) : characters.map(character => (
-                                    <option key={character.id} value={character.id}>{character.name}</option>
-                                ))}
-                            </select>
-                            <div style={{
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "space-between",
-                                gap: 12,
-                                marginTop: 12,
-                                paddingTop: 12,
-                                borderTop: `1px solid ${DIVIDER}`,
-                            }}>
-                                <div style={{ minWidth: 0 }}>
-                                    <div style={{ fontSize: 12.4, fontWeight: 600, color: TEXT_MAIN }}>强制查岗</div>
-                                    <div style={{ marginTop: 3, fontSize: 11, color: TEXT_FAINT }}>无视上面的权限，TA 可以直接翻整台手机</div>
-                                </div>
-                                <Toggle checked={forceMode} onChange={setForceMode} />
-                            </div>
-                            <button
-                                type="button"
-                                className="ui-btn"
-                                onClick={handleGenerate}
-                                disabled={generating || characters.length === 0}
-                                style={{
-                                    width: "100%",
-                                    marginTop: 12,
-                                    background: ACCENT,
-                                    color: "#fff",
-                                    boxShadow: "0 4px 14px rgba(95, 127, 118, 0.28)",
-                                }}
-                            >
-                                {generating ? "正在翻看…" : forceMode ? "强制查岗（实时）" : "让 TA 现在查岗（实时）"}
-                            </button>
-                            {error ? (
-                                <div style={{ marginTop: 8, fontSize: 11.5, color: "#b4544d", lineHeight: 1.5 }}>{error}</div>
-                            ) : null}
-                        </div>
-                    </div>
-
-                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                         <SectionLabel>查岗记录</SectionLabel>
                         {sortedLogs.length === 0 ? (
                             <div style={cardStyle({ textAlign: "center", padding: "28px 16px" })}>
                                 <div style={{ fontSize: 13, fontWeight: 600, color: "#5f716c" }}>还没有查岗记录</div>
                                 <div style={{ marginTop: 6, fontSize: 11.5, lineHeight: 1.6, color: TEXT_FAINT }}>
-                                    选一个角色，让 TA 翻翻你的手机。
+                                    把手机递给 TA，或者打开强制查岗。
                                 </div>
                             </div>
                         ) : sortedLogs.map(log => (
@@ -463,7 +597,7 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
                 </div>
             </PageShell>
 
-            {chatHintSessionId ? (
+            {chatHintSessionId && !watching ? (
                 <button
                     type="button"
                     onClick={openHintChat}
@@ -491,62 +625,17 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
             ) : null}
 
             {watching ? (
-                <div style={{
-                    position: "absolute",
-                    inset: 0,
-                    background: "rgba(28, 36, 34, 0.42)",
-                    backdropFilter: "blur(3px)",
-                    display: "flex",
-                    alignItems: "flex-end",
-                    padding: 16,
-                    zIndex: 30,
-                }}>
-                    <div style={{
-                        width: "100%",
-                        borderRadius: 20,
-                        background: "var(--c-card-bg, #ffffff)",
-                        padding: 18,
-                        boxShadow: "0 18px 44px rgba(0,0,0,0.22)",
-                    }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <span style={{ fontSize: 13, fontWeight: 600, color: TEXT_MAIN }}>
-                                {watching.finished ? "TA 看完了" : `TA 正在翻你的手机… ${Math.min(watching.index, watching.logs.length)}/${watching.logs.length}`}
-                            </span>
-                            <span style={{ marginLeft: "auto", fontSize: 11, color: TEXT_FAINT }}>{watching.characterName}</span>
-                        </div>
-                        <div style={{ marginTop: 10, height: 3, borderRadius: 2, background: "rgba(124,147,168,0.18)", overflow: "hidden" }}>
-                            <div style={{ width: `${Math.min(100, (watching.index / watching.logs.length) * 100)}%`, height: "100%", background: ACCENT, transition: "width 0.4s ease" }} />
-                        </div>
-                        <div style={{ marginTop: 14, minHeight: 74 }}>
-                            {watching.index === 0 ? (
-                                <div style={{ fontSize: 12.4, color: TEXT_SUB }}>TA 拿起你的手机，正在解锁…</div>
-                            ) : (
-                                watching.logs.slice(0, watching.index).slice(-1).map(log => (
-                                    <div key={log.id}>
-                                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                            <span style={{ fontSize: 10.5, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: log.kind === "view" ? "rgba(124,147,168,0.16)" : "rgba(95,127,118,0.18)", color: log.kind === "view" ? MIST : ACCENT_DEEP }}>
-                                                {log.kind === "view" ? "查看" : "改动"}
-                                            </span>
-                                            <span style={{ fontSize: 11.5, color: TEXT_SUB }}>{log.appLabel}</span>
-                                        </div>
-                                        <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.55, color: "#3d4f4b" }}>{log.summary}</div>
-                                        {log.detail ? <div style={{ marginTop: 5, fontSize: 11.5, lineHeight: 1.55, color: "#6b7a76", whiteSpace: "pre-wrap" }}>{log.detail}</div> : null}
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-                            {watching.finished ? (
-                                <>
-                                    <button type="button" onClick={() => setWatching(null)} style={softButtonStyle("#6f8188", "rgba(124,147,168,0.13)")}>关闭</button>
-                                    <button type="button" onClick={() => { setWatching(null); window.setTimeout(openHintChat, 60); }} disabled={!chatHintSessionId} style={{ ...softButtonStyle(ACCENT_DEEP, "rgba(95,127,118,0.16)"), flex: 1 }}>去聊天</button>
-                                </>
-                            ) : (
-                                <button type="button" onClick={interruptWatch} style={{ ...softButtonStyle("#b4544d", "rgba(180,84,77,0.12)"), flex: 1 }}>打断 TA</button>
-                            )}
-                        </div>
-                    </div>
-                </div>
+                <InspectLiveScreen
+                    snapshot={currentSnapshot || idleSnapshot(watching.characterName)}
+                    characterName={watching.characterName}
+                    step={watching.index}
+                    total={watching.logs.length}
+                    finished={watching.finished}
+                    hasChatHint={Boolean(chatHintSessionId)}
+                    onClose={() => setWatching(null)}
+                    onInterrupt={interruptWatch}
+                    onGoChat={openHintChat}
+                />
             ) : null}
         </div>
     );

@@ -12,23 +12,36 @@ import {
     addCoupleWish,
     addLoveLetter,
     coupleDaysTogether,
-    createCoupleInvite,
     createCoupleSpace,
     loadCoupleInvite,
     loadCoupleSpace,
     removeCouplePhoto,
     removeCoupleWish,
+    resolveCoupleInvite,
     saveCoupleRemarks,
     toggleCoupleWish,
     type CoupleSpaceState,
 } from "@/lib/couple-space-storage";
 import { generateCoupleWish, generateLoveLetter } from "@/lib/couple-space-engine";
-import { createOrGetSession, pushChatMessage } from "@/lib/chat-storage";
+import { createOrGetSession, loadChatSessions, pushChatMessage } from "@/lib/chat-storage";
 
 type Tab = "album" | "letters" | "wishes" | "notes";
 
 function characterAvatar(character: Character): string | undefined {
     return (character.chatAvatarEnabled !== false ? character.chatAvatar : character.avatar) || character.avatar || undefined;
+}
+
+function pickDefaultCharacterId(characters: Character[]): string {
+    if (characters.length === 0) return "";
+    const sessions = loadChatSessions()
+        .filter(session => !session.isGroup)
+        .slice()
+        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+    for (const session of sessions) {
+        const hit = characters.find(character => character.id === session.contactId);
+        if (hit) return hit.id;
+    }
+    return characters[0].id;
 }
 
 function todayKey(): string {
@@ -65,6 +78,7 @@ export function CoupleSpaceApp({ onClose, onNotice }: { onClose: () => void; onN
     const [space, setSpace] = useState<CoupleSpaceState | null>(null);
     const [tab, setTab] = useState<Tab>("album");
     const [inviteRefresh, setInviteRefresh] = useState(0);
+    const [showPicker, setShowPicker] = useState(false);
     const [letterDraft, setLetterDraft] = useState("");
     const [wishDraft, setWishDraft] = useState("");
     const [wishMood, setWishMood] = useState<"正经" | "不正经">("正经");
@@ -87,30 +101,45 @@ export function CoupleSpaceApp({ onClose, onNotice }: { onClose: () => void; onN
         return () => timers.forEach(t => window.clearTimeout(t));
     }, []);
 
+    // 进来就直接是“和你最亲近的那一位”，不用先选人。
+    useEffect(() => {
+        if (selectedId && characters.some(item => item.id === selectedId)) return;
+        setSelectedId(characters.length > 0 ? pickDefaultCharacterId(characters) : null);
+    }, [characters, selectedId]);
+
     useEffect(() => {
         setSpace(selectedId ? loadCoupleSpace(selectedId) : null);
     }, [selectedId]);
 
-    const activeInvite = selected ? loadCoupleInvite(selected.id) : null; // eslint-disable-line react-hooks/exhaustive-deps
+    const activeInvite = selected ? loadCoupleInvite(selected.id) : null;
 
-    const requestInviteFromChat = () => {
+    // 不预设邀请。只是轻轻提一句，让 TA 按当下的关系自己决定要不要开口。
+    const nudgeCharacter = () => {
         if (!selected) return;
         try {
-            createCoupleInvite(selected.id, selected.name);
             const session = createOrGetSession(selected.id);
             pushChatMessage({
                 sessionId: session.id,
                 role: "user",
-                content: `（把情侣空间的事提起来，想等 TA 主动邀请我。）`,
+                content: "（点开情侣空间看了看，里面空空的。）我刚刚点开了那个……你怎么没动静呀？",
                 status: "sent",
             });
             window.dispatchEvent(new CustomEvent("ai-chat-request-reply", { detail: { sessionId: session.id } }));
             setInviteRefresh(value => value + 1);
-            onNotice?.("已在微信里提起情侣空间，等 TA 邀请你");
+            onNotice?.(`跟 ${selected.name} 提了一句，看 TA 怎么接`);
             window.dispatchEvent(new CustomEvent("open-app", { detail: { appId: "chat" } }));
         } catch {
-            onNotice?.("暂时无法发起，请检查聊天会话");
+            onNotice?.("暂时提不了，先检查一下和 TA 的聊天");
         }
+    };
+
+    const acceptInvite = () => {
+        if (!selected) return;
+        const next = loadCoupleSpace(selected.id) || createCoupleSpace(selected.id, selected.name);
+        resolveCoupleInvite(selected.id, "accepted");
+        setSpace(next);
+        setInviteRefresh(value => value + 1);
+        onNotice?.("情侣空间开了");
     };
 
     const pairNow = () => {
@@ -196,41 +225,68 @@ export function CoupleSpaceApp({ onClose, onNotice }: { onClose: () => void; onN
 
     const todayLetterWrittenByUser = Boolean(space?.letters.some(item => item.author === "user" && item.createdAt.slice(0, 10) === todayKey()));
 
-    const renderUnpaired = () => (
-        <div style={{ padding: "20px 22px 120px" }}>
-            <div style={{ borderRadius: 22, padding: "28px 20px", background: "linear-gradient(160deg, #fde8ee 0%, #f6e7f7 60%, #eef1fb 100%)", textAlign: "center" }}>
-                <div style={{ width: 64, height: 64, margin: "0 auto 14px", borderRadius: "50%", background: "rgba(255,255,255,0.7)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <Heart size={30} color="#e06a86" />
+    const renderUnpaired = () => {
+        if (!selected) {
+            return (
+                <div style={{ textAlign: "center", padding: "60px 24px", fontSize: 13, color: "var(--c-text-secondary, #8a8a8a)" }}>
+                    还没有角色。先去创建一个，再来这里。
                 </div>
-                <div style={{ fontSize: 18, fontWeight: 600, color: "#5a3b47" }}>还没有属于你们的空间</div>
-                <div style={{ fontSize: 13, lineHeight: 1.7, color: "#8a6b75", marginTop: 10 }}>
-                    情侣空间由 TA 主动邀请你。邀请会出现在微信聊天里，24 小时内有效；拒绝或过期后，TA 还可以再申请。
+            );
+        }
+        const pending = activeInvite?.status === "pending";
+        const expires = activeInvite
+            ? new Date(activeInvite.expiresAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })
+            : "";
+        return (
+            <div style={{ padding: "18px 22px 120px" }}>
+                <div style={{ borderRadius: 24, padding: "30px 22px 26px", background: "linear-gradient(165deg, #fde8ee 0%, #f7e9f6 55%, #eef1fb 100%)", textAlign: "center" }}>
+                    <div style={{ width: 66, height: 66, margin: "0 auto 16px", borderRadius: "50%", background: "rgba(255,255,255,0.72)", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 6px 18px rgba(224,106,134,0.18)" }}>
+                        <Heart size={30} color="#e06a86" fill={pending ? "#e06a86" : "none"} />
+                    </div>
+                    <div style={{ fontSize: 19, fontWeight: 600, color: "#5a3b47" }}>
+                        {pending ? "TA 把门推开了一条缝" : "这里还空着"}
+                    </div>
+                    <div style={{ fontSize: 13, lineHeight: 1.75, color: "#8a6b75", marginTop: 10 }}>
+                        {pending
+                            ? `${selected.name} 没多说，只留了个邀请给你。${expires} 前都算数。`
+                            : `你和${selected.name}之间，还差一个只有你们两个人能看到的地方。`}
+                    </div>
                 </div>
-            </div>
-            {selected && (
-                <div style={{ marginTop: 18, padding: "14px 16px", borderRadius: 16, background: "var(--c-card-bg, #fff)" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+
+                <div style={{ marginTop: 18, padding: "15px 16px", borderRadius: 18, background: "var(--c-card-bg, #fff)", border: "1px solid rgba(224,106,134,0.12)" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                         <Avatar src={characterAvatar(selected)} name={selected.name} />
-                        <div style={{ flex: 1 }}>
-                            <div style={{ fontSize: 15 }}>{selected.name}</div>
-                            <div style={{ fontSize: 12, color: "var(--c-text-secondary, #8a8a8a)" }}>
-                                {activeInvite?.status === "pending" ? `已经邀请你了 · ${new Date(activeInvite.expiresAt).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })} 前有效` : "还没有有效邀请"}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 15.5, color: "var(--c-text)" }}>{selected.name}</div>
+                            <div style={{ fontSize: 12, color: pending ? "#e06a86" : "var(--c-text-secondary, #8a8a8a)", marginTop: 2 }}>
+                                {pending ? "邀请还在，要我开门吗？" : "还没说话。也许在等你先开口。"}
                             </div>
                         </div>
                     </div>
-                    <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-                        <button type="button" className="ui-btn ui-btn-outline" style={{ flex: 1 }} onClick={requestInviteFromChat}>让 TA 邀请我</button>
-                        {activeInvite?.status === "pending" && (
-                            <button type="button" className="ui-btn ui-btn-soft-action" style={{ flex: 1 }} onClick={pairNow}>直接同意</button>
+                    <div style={{ display: "flex", gap: 10, marginTop: 15 }}>
+                        {pending ? (
+                            <>
+                                <button type="button" className="ui-btn ui-btn-soft-action" style={{ flex: 1 }} onClick={acceptInvite}>推门进去</button>
+                                <button type="button" className="ui-btn ui-btn-outline" style={{ flex: 1 }} onClick={nudgeCharacter}>先聊两句</button>
+                            </>
+                        ) : (
+                            <>
+                                <button type="button" className="ui-btn ui-btn-soft-action" style={{ flex: 1 }} onClick={nudgeCharacter}>跟 TA 提一句</button>
+                                <button type="button" className="ui-btn ui-btn-outline" style={{ flex: 1 }} onClick={pairNow}>我先开一个</button>
+                            </>
                         )}
                     </div>
                 </div>
-            )}
-        </div>
-    );
+
+                <div style={{ marginTop: 16, textAlign: "center", fontSize: 11.5, lineHeight: 1.7, color: "var(--c-text-secondary, #8a8a8a)" }}>
+                    开了之后，相册、情书、愿望板都只有你们两个人看得到。
+                </div>
+            </div>
+        );
+    };
 
     const renderPaired = () => {
-        if (!space || !selected) return null;
+        if (!space || !selected || space.characterId !== selected.id) return null;
         const days = coupleDaysTogether(space.pairedAt);
         const nextMilestone = Math.ceil(days / 100) * 100;
         const doneWishes = space.wishes.filter(item => item.done).length;
@@ -391,34 +447,66 @@ export function CoupleSpaceApp({ onClose, onNotice }: { onClose: () => void; onN
         <div data-app-css="couplespace" style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", background: "var(--c-page-body-bg, #faf6f7)", overflow: "hidden" }}>
             <AppCustomCSS appId="couplespace" />
             <header style={{ padding: "calc(env(safe-area-inset-top, 0px) + 44px) 16px 8px", display: "flex", alignItems: "center", gap: 10 }}>
-                <button type="button" onClick={() => { if (selectedId) setSelectedId(null); else onClose(); }} style={iconButtonStyle} aria-label="返回"><ChevronLeft size={24} /></button>
-                <span style={{ fontSize: 22, fontWeight: 600, flex: 1 }}>{space ? "情侣空间" : "情侣空间"}</span>
-                {!selectedId && characters.length > 0 && <span style={{ fontSize: 12, color: "var(--c-text-secondary, #8a8a8a)" }}>选择一位角色</span>}
+                <button type="button" onClick={onClose} style={iconButtonStyle} aria-label="返回"><ChevronLeft size={24} /></button>
+                <span style={{ fontSize: 22, fontWeight: 600, flex: 1 }}>情侣空间</span>
+                {selected ? (
+                    <span style={{ fontSize: 12, color: "var(--c-text-secondary, #8a8a8a)" }}>{selected.name}</span>
+                ) : null}
             </header>
 
-            {!selectedId ? (
-                <div style={{ flex: 1, overflowY: "auto", padding: "6px 20px 30px" }}>
-                    {characters.length === 0 ? (
-                        <div style={{ textAlign: "center", padding: 50, fontSize: 13, color: "var(--c-text-secondary, #8a8a8a)" }}>还没有角色，先去创建一位吧。</div>
-                    ) : characters.map(character => {
-                        const paired = Boolean(loadCoupleSpace(character.id));
-                        return (
-                            <button key={character.id} type="button" onClick={() => { setSelectedId(character.id); setTab("album"); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "13px 0", background: "none", border: "none", borderBottom: "0.5px solid rgba(0,0,0,0.08)", cursor: "pointer", textAlign: "left" }}>
-                                <Avatar src={characterAvatar(character)} name={character.name} />
-                                <div style={{ flex: 1 }}>
-                                    <div style={{ fontSize: 16, color: "var(--c-text)" }}>{character.name}</div>
-                                    <div style={{ fontSize: 12, color: paired ? "#e06a86" : "var(--c-text-secondary, #8a8a8a)" }}>{paired ? "情侣空间已开启" : "尚未开启情侣空间"}</div>
-                                </div>
-                                <ChevronLeft size={16} style={{ transform: "rotate(180deg)", color: "var(--c-text-secondary, #8a8a8a)" }} />
-                            </button>
-                        );
-                    })}
-                </div>
-            ) : (
+            {selected ? (
                 <div style={{ flex: 1, overflowY: "auto" }} key={inviteRefresh}>
                     {space ? renderPaired() : renderUnpaired()}
+                    {characters.length > 1 ? (
+                        <div style={{ textAlign: "center", padding: "4px 20px 34px" }}>
+                            <button type="button" onClick={() => setShowPicker(true)} style={switchButtonStyle}>
+                                不是 {selected.name}？换一位
+                            </button>
+                        </div>
+                    ) : null}
+                </div>
+            ) : (
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 40, textAlign: "center", fontSize: 13, color: "var(--c-text-secondary, #8a8a8a)" }}>
+                    还没有角色。先去创建一个吧。
                 </div>
             )}
+
+            {showPicker ? (
+                <div
+                    onClick={() => setShowPicker(false)}
+                    style={{ position: "absolute", inset: 0, zIndex: 20, background: "rgba(20,16,18,0.32)", display: "flex", alignItems: "flex-end" }}
+                >
+                    <div
+                        onClick={event => event.stopPropagation()}
+                        style={{ width: "100%", background: "var(--c-card-bg, #fff)", borderRadius: "20px 20px 0 0", padding: "18px 20px calc(env(safe-area-inset-bottom, 0px) + 20px)", maxHeight: "70vh", overflowY: "auto" }}
+                    >
+                        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>换一位</div>
+                        <div style={{ fontSize: 12, color: "var(--c-text-secondary, #8a8a8a)", marginBottom: 12 }}>
+                            每一段关系都有它自己的空间。
+                        </div>
+                        {characters.map(character => {
+                            const paired = Boolean(loadCoupleSpace(character.id));
+                            return (
+                                <button
+                                    key={character.id}
+                                    type="button"
+                                    onClick={() => { setSelectedId(character.id); setTab("album"); setShowPicker(false); }}
+                                    style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "12px 0", background: "none", border: "none", borderBottom: "0.5px solid rgba(0,0,0,0.08)", cursor: "pointer", textAlign: "left" }}
+                                >
+                                    <Avatar src={characterAvatar(character)} name={character.name} />
+                                    <div style={{ flex: 1 }}>
+                                        <div style={{ fontSize: 15.5, color: "var(--c-text)" }}>{character.name}</div>
+                                        <div style={{ fontSize: 12, color: paired ? "#e06a86" : "var(--c-text-secondary, #8a8a8a)" }}>
+                                            {paired ? "已经开过了" : "还没开"}
+                                        </div>
+                                    </div>
+                                    {character.id === selected?.id ? <span style={{ fontSize: 11, color: "#e06a86" }}>在</span> : null}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            ) : null}
         </div>
     );
 }
@@ -452,4 +540,15 @@ const iconButtonStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
+};
+
+const switchButtonStyle: React.CSSProperties = {
+    background: "none",
+    border: "none",
+    padding: "6px 10px",
+    cursor: "pointer",
+    fontSize: 11.5,
+    color: "var(--c-text-secondary, #8a8a8a)",
+    textDecoration: "underline",
+    textUnderlineOffset: 3,
 };
