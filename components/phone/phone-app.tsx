@@ -26,7 +26,7 @@ import {
     type PhoneCallLog,
 } from "@/lib/phone-call-storage";
 import { createOrGetSession, pushChatMessage, type ChatSession } from "@/lib/chat-storage";
-import { VoiceCallScreen } from "@/components/chat/voice-call-screen";
+import { SystemCallScreen } from "./system-call-screen";
 
 type PhoneTab = "favorites" | "recents" | "contacts" | "keypad" | "voicemail";
 
@@ -74,7 +74,6 @@ export function PhoneApp({ onClose, onNotice }: { onClose: () => void; onNotice?
     const [voiceCall, setVoiceCall] = useState<{
         character: Character;
         session: ChatSession;
-        initiator: "user" | "character";
         direction: "outgoing" | "incoming";
     } | null>(null);
     const [favorites, setFavorites] = useState<string[]>(() => {
@@ -132,7 +131,7 @@ export function PhoneApp({ onClose, onNotice }: { onClose: () => void; onNotice?
     const mountVoiceCall = useCallback((character: Character, direction: "outgoing" | "incoming") => {
         try {
             const session = createOrGetSession(character.id);
-            setVoiceCall({ character, session, initiator: "user", direction });
+            setVoiceCall({ character, session, direction });
         } catch {
             onNotice?.("无法建立通话，请先打开和 TA 的聊天");
         }
@@ -384,13 +383,11 @@ export function PhoneApp({ onClose, onNotice }: { onClose: () => void; onNotice?
 
             {call && <CallOverlay state={call} onHangup={hangUp} onAnswer={answerCall} onDecline={declineCall} />}
             {voiceCall && (
-                <VoiceCallScreen
+                <SystemCallScreen
                     session={voiceCall.session}
                     character={voiceCall.character}
-                    mode="system"
-                    initiator={voiceCall.initiator}
-                    onEnd={() => setVoiceCall(null)}
-                    onSystemCallEnd={(payload) => finishSystemCall(voiceCall, payload)}
+                    direction={voiceCall.direction}
+                    onEnd={(payload) => finishSystemCall(voiceCall, payload)}
                 />
             )}
         </div>
