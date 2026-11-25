@@ -4261,49 +4261,23 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
         }
 
         try {
-            await hydrateStoryStorage();
-            const characterId = invite.mediaData?.meetingInviteCharacterId || session.contactId;
             const characterName = invite.mediaData?.meetingInviteCharacterName || character?.name || "角色";
-            const mainSession = loadStorySessionsForOwner("single", characterId)
-                .find((item) => (item.branchId || "main") === "main")
-                || createOrGetStorySession(characterId, { ownerType: "single", ownerId: characterId, branchId: "main" });
-            const now = new Date();
-            const branchName = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-            const storySession = createOrGetStorySession(characterId, {
-                ownerType: "single",
-                ownerId: characterId,
-                participantIds: [characterId],
-                branchId: `invite_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-                branchName,
-                inheritRecentMemory: true,
-                independentStory: false,
-                baseSession: mainSession,
-            });
-            const acceptedReaction = invite.mediaData?.meetingInviteAcceptResponse?.trim();
             const meetingDescription = invite.mediaData?.meetingInviteDescription?.trim();
-            const launchPrompt = `${characterName}在线上邀请${userIdentity?.name || "用户"}线下见面，用户已经同意。${meetingDescription ? `邀请说明：${meetingDescription}。` : ""}${acceptedReaction ? `${characterName}对此的反应是：${acceptedReaction}。` : ""}请由${characterName}根据刚才的私聊语境自然开启这次见面剧情。`;
-            updateStorySession(storySession.id, {
-                autoStartPrompt: launchPrompt,
-                autoStartRequestedAt: resolvedAt,
-            });
-            const nextStorySession = {
-                ...storySession,
-                autoStartPrompt: launchPrompt,
-                autoStartRequestedAt: resolvedAt,
-            };
-            saveStoryLaunchTarget(nextStorySession);
-
+            const acceptedReaction = invite.mediaData?.meetingInviteAcceptResponse?.trim();
             const nextMediaData: ChatMessage["mediaData"] = {
                 ...invite.mediaData,
                 meetingInviteStatus: "accepted",
                 meetingInviteResolvedAt: resolvedAt,
-                meetingInviteStorySessionId: storySession.id,
             };
             updateMessageMediaData(invite.id, nextMediaData);
             setMessages((current) => current.map((item) => item.id === invite.id ? { ...item, mediaData: nextMediaData } : item));
-            window.dispatchEvent(new CustomEvent("open-app", { detail: { appId: "story" } }));
+            // 接受见面邀请后直接进入本会话的线下模式；线上从此知道两人此刻在一起。
+            setSessionOfflineMode(session.id, true);
+            setOfflineMode(true);
+            const opening = `（我答应了这次见面${meetingDescription ? `：${meetingDescription}` : ""}。${acceptedReaction ? `${characterName}的反应是：${acceptedReaction}。` : ""}）`;
+            handleOfflineSend(opening);
         } catch (error) {
-            showChatToast(error instanceof Error ? error.message : "创建见面剧情失败，请稍后再试");
+            showChatToast(error instanceof Error ? error.message : "进入线下见面失败，请稍后再试");
         }
     };
 
@@ -4353,6 +4327,22 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
         }
         return map;
     }, [getOfflineDisplayText, visibleOfflineTurns]);
+
+    // 线下状态栏：取最近一条线下回复里的 [状态栏]，用与线上同一套自定义配置渲染。
+    const offlineStatusPanel = useMemo(() => {
+        for (let index = visibleOfflineTurns.length - 1; index >= 0; index -= 1) {
+            const turn = visibleOfflineTurns[index];
+            const display = offlineDisplayByTurnId.get(turn.id) ?? getOfflineDisplayText(turn);
+            const content = display.assistantContent;
+            if (!content || !content.trim()) continue;
+            try {
+                const parsed = parseAIResponse(content, []);
+                if (parsed.statusPanel && parsed.statusPanel.trim()) return parsed.statusPanel;
+            } catch { /* 解析失败就不显示状态栏 */ }
+            return "";
+        }
+        return "";
+    }, [getOfflineDisplayText, offlineDisplayByTurnId, visibleOfflineTurns]);
 
     const loadMoreOfflineTurns = useCallback(() => {
         if (!hasMoreOfflineTurns) return;
@@ -5874,6 +5864,15 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
             >
                 {offlineMode && (
                     <div className="chat-offline-body">
+                        {offlineStatusPanel && (
+                            <div className="chat-status-bare">
+                                {customStatusActive && statusRegionCfg.renderHtml.trim() ? (
+                                    <CustomStatusFrame html={statusRegionCfg.renderHtml} raw={offlineStatusPanel} />
+                                ) : (
+                                    <BilingualTextBlock text={offlineStatusPanel} mode="markdown" defaultExpanded={session.collapseBilingualTranslation !== false ? false : true} htmlFrameVariant="offline" />
+                                )}
+                            </div>
+                        )}
                         {offlineTurns.length === 0 && !pendingOfflineUserText ? (
                             <div className="chat-offline-empty">
                                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0Z" /><circle cx="12" cy="10" r="3" /></svg>
