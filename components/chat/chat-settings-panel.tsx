@@ -47,7 +47,7 @@ import { resolveUserIdentity, loadApiConfigs, loadBindingConfig, loadPresets, re
 import { resolveChatAccountUserIdentity } from "@/lib/chat-scope-storage";
 import { removeChatAltAccountFriend } from "@/lib/chat-alt-account-storage";
 import { sendLLMRequest } from "@/lib/chat-engine";
-import { clearStatusRegionConfig, getStatusRegionConfig, hasOwnStatusRegionConfig, saveStatusRegionConfig, presetSupportsStatusRegion, isCustomStatusRegionActive, STATUS_REGION_SCHEME_TARGET, STATUS_REGION_UPDATED_EVENT, type StatusRegionConfig } from "@/lib/chat-status-region";
+import { clearStatusRegionConfig, getStatusRegionConfig, hasOwnStatusRegionConfig, saveStatusRegionConfig, clearOfflineStatusRegionConfig, getOfflineStatusRegionConfig, hasOwnOfflineStatusRegionConfig, saveOfflineStatusRegionConfig, presetSupportsStatusRegion, isCustomStatusRegionActive, STATUS_REGION_SCHEME_TARGET, STATUS_REGION_UPDATED_EVENT, type StatusRegionConfig } from "@/lib/chat-status-region";
 import { downloadFile } from "@/lib/download-utils";
 import { createChatRecordExport, importChatRecordFile } from "@/lib/chat-record-transfer";
 import { getSchemes, saveScheme, deleteScheme, type CSSScheme } from "@/lib/css-scheme-storage";
@@ -341,6 +341,10 @@ export function ChatSettingsPanel({
     // 自定义状态栏（状态区）
     const [statusRegion, setStatusRegion] = useState<StatusRegionConfig>(() => getStatusRegionConfig(session.id, !session.isGroup));
     const [statusUsesGlobal, setStatusUsesGlobal] = useState(() => !session.isGroup && !hasOwnStatusRegionConfig(session.id));
+    // 线下状态栏：未单独设置时跟随线上
+    const [offlineStatusRegion, setOfflineStatusRegion] = useState<StatusRegionConfig>(() => getOfflineStatusRegionConfig(session.id, !session.isGroup));
+    const [offlineStatusOwned, setOfflineStatusOwned] = useState(() => hasOwnOfflineStatusRegionConfig(session.id));
+    const [statusDialogScope, setStatusDialogScope] = useState<"online" | "offline">("online");
     const [showStatusRegionDialog, setShowStatusRegionDialog] = useState(false);
     const [draftContract, setDraftContract] = useState("");
     const [draftRender, setDraftRender] = useState("");
@@ -403,6 +407,11 @@ export function ChatSettingsPanel({
         saveStatusRegionConfig(session.id, next);
         setStatusUsesGlobal(!session.isGroup && !hasOwnStatusRegionConfig(session.id));
     };
+    const saveOfflineStatusRegion = (next: StatusRegionConfig) => {
+        setOfflineStatusRegion(next);
+        saveOfflineStatusRegionConfig(session.id, next);
+        setOfflineStatusOwned(hasOwnOfflineStatusRegionConfig(session.id));
+    };
     // 小卷的状态栏工具写入后广播，这里同步刷新——否则本页状态只在挂载时初始化一次，
     // 面板开着的时候被写入就会停在旧值，表现为「后台写了、前台看不到」。
     // 弹窗正开着时连草稿一起换掉，用户看到的就是小卷刚写的那份，可继续手改。
@@ -413,21 +422,27 @@ export function ChatSettingsPanel({
             const next = getStatusRegionConfig(session.id, !session.isGroup);
             setStatusRegion(next);
             setStatusUsesGlobal(!session.isGroup && !hasOwnStatusRegionConfig(session.id));
+            const nextOffline = getOfflineStatusRegionConfig(session.id, !session.isGroup);
+            setOfflineStatusRegion(nextOffline);
+            setOfflineStatusOwned(hasOwnOfflineStatusRegionConfig(session.id));
             if (showStatusRegionDialog) {
-                setDraftContract(next.contract || STATUS_REGION_STARTER_CONTRACT);
-                setDraftRender(next.renderHtml || STATUS_REGION_STARTER_RENDER);
-                setStatusPreviewRaw(next.previewRaw || STATUS_REGION_STARTER_PREVIEW);
+                const target = statusDialogScope === "offline" ? nextOffline : next;
+                setDraftContract(target.contract || STATUS_REGION_STARTER_CONTRACT);
+                setDraftRender(target.renderHtml || STATUS_REGION_STARTER_RENDER);
+                setStatusPreviewRaw(target.previewRaw || STATUS_REGION_STARTER_PREVIEW);
                 setPreviewHtml("");
             }
         };
         window.addEventListener(STATUS_REGION_UPDATED_EVENT, onExternalWrite);
         return () => window.removeEventListener(STATUS_REGION_UPDATED_EVENT, onExternalWrite);
-    }, [session.id, session.isGroup, showStatusRegionDialog]);
-    const openStatusRegionDialog = () => {
-        setDraftContract(statusRegion.contract || STATUS_REGION_STARTER_CONTRACT);
-        setDraftRender(statusRegion.renderHtml || STATUS_REGION_STARTER_RENDER);
+    }, [session.id, session.isGroup, showStatusRegionDialog, statusDialogScope]);
+    const openStatusRegionDialog = (scope: "online" | "offline" = "online") => {
+        const target = scope === "offline" ? offlineStatusRegion : statusRegion;
+        setStatusDialogScope(scope);
+        setDraftContract(target.contract || STATUS_REGION_STARTER_CONTRACT);
+        setDraftRender(target.renderHtml || STATUS_REGION_STARTER_RENDER);
         // 示例数据跟着契约走：小卷写入时会一并给出，否则内置样例的字段对不上新契约
-        setStatusPreviewRaw(statusRegion.previewRaw || STATUS_REGION_STARTER_PREVIEW);
+        setStatusPreviewRaw(target.previewRaw || STATUS_REGION_STARTER_PREVIEW);
         setPreviewHtml("");
         setShowStatusRegionDialog(true);
     };
@@ -1285,7 +1300,7 @@ export function ChatSettingsPanel({
                             </div>
                         </div>
                         {statusRegion.mode !== "native" && (
-                            <div className="menu-item cursor-pointer" onClick={openStatusRegionDialog}>
+                            <div className="menu-item cursor-pointer" onClick={() => openStatusRegionDialog("online")}>
                                 <ChatInfoIcon icon={Sparkles} color={BINDING_ACCENTS.preset} />
                                 <div className="menu-label-group">
                                     <span className="menu-label">自定义状态栏</span>
@@ -1314,6 +1329,64 @@ export function ChatSettingsPanel({
                             <button className="menu-item" onClick={() => { clearStatusRegionConfig(session.id); setStatusRegion(getStatusRegionConfig(session.id, true)); setStatusUsesGlobal(true); }}>
                                 <ChatInfoIcon icon={Sparkles} color={BINDING_ACCENTS.preset} />
                                 <div className="menu-label-group"><span className="menu-label">状态栏恢复全局</span><span className="menu-desc">删除当前会话覆盖设置</span></div>
+                                <div className="menu-right"><ChevronRight size={16} /></div>
+                            </button>
+                        )}
+                    </div>
+                )}
+
+                {/* 线下状态栏：和上面线上设置放在一起，默认跟随线上；单独改过就只影响线下。
+                    线下开关 = 原生；关掉后走自定义/关闭，语义与线上那块一致。 */}
+                {!session.isGroup && (
+                    <div className="menu-group">
+                        <div className="menu-item">
+                            <ChatInfoIcon icon={Code} color={BINDING_ACCENTS.preset} />
+                            <div className="menu-label-group">
+                                <span className="menu-label">线下状态栏</span>
+                                <span className="menu-desc">{offlineStatusOwned ? "已单独设置，只影响线下" : "未单独设置，跟随上方线上状态栏"}</span>
+                            </div>
+                            <div className="menu-right">
+                                <Toggle
+                                    checked={offlineStatusRegion.mode === "native"}
+                                    onChange={c => {
+                                        saveOfflineStatusRegion({
+                                            ...offlineStatusRegion,
+                                            mode: c ? "native" : (offlineStatusRegion.contract.trim() && offlineStatusRegion.renderHtml.trim() ? "custom" : "off"),
+                                        });
+                                    }}
+                                />
+                            </div>
+                        </div>
+                        {offlineStatusRegion.mode !== "native" && (
+                            <div className="menu-item cursor-pointer" onClick={() => openStatusRegionDialog("offline")}>
+                                <ChatInfoIcon icon={Sparkles} color={BINDING_ACCENTS.preset} />
+                                <div className="menu-label-group">
+                                    <span className="menu-label">自定义线下状态栏</span>
+                                    <span className="menu-desc">{isCustomStatusRegionActive(offlineStatusRegion)
+                                        ? "已启用——点此编辑契约与渲染"
+                                        : offlineStatusRegion.contract.trim() && offlineStatusRegion.renderHtml.trim()
+                                            ? "已停用——配置保留，拨开关重新启用"
+                                            : "未配置——点此填写契约与渲染"}</span>
+                                </div>
+                                <div className="menu-right" onClick={e => e.stopPropagation()}>
+                                    <Toggle
+                                        checked={isCustomStatusRegionActive(offlineStatusRegion)}
+                                        onChange={c => {
+                                            if (!c) { saveOfflineStatusRegion({ ...offlineStatusRegion, mode: "off" }); return; }
+                                            if (offlineStatusRegion.contract.trim() && offlineStatusRegion.renderHtml.trim()) {
+                                                saveOfflineStatusRegion({ ...offlineStatusRegion, mode: "custom" });
+                                            } else {
+                                                openStatusRegionDialog("offline"); // 还没配置：先进弹窗填，保存即启用
+                                            }
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                        )}
+                        {offlineStatusOwned && (
+                            <button className="menu-item" onClick={() => { clearOfflineStatusRegionConfig(session.id); setOfflineStatusRegion(getOfflineStatusRegionConfig(session.id, true)); setOfflineStatusOwned(false); }}>
+                                <ChatInfoIcon icon={Sparkles} color={BINDING_ACCENTS.preset} />
+                                <div className="menu-label-group"><span className="menu-label">线下跟随线上</span><span className="menu-desc">删除线下的单独设置</span></div>
                                 <div className="menu-right"><ChevronRight size={16} /></div>
                             </button>
                         )}
@@ -2152,7 +2225,7 @@ export function ChatSettingsPanel({
                 <div className="fixed inset-0 z-[10030] flex items-end justify-center bg-black/45 sm:items-center" role="dialog" aria-modal="true" aria-label="自定义状态栏">
                     <div className="flex max-h-[86vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl bg-[var(--c-page-body-bg)] text-[var(--c-text)] shadow-2xl sm:rounded-2xl">
                         <div className="flex items-center justify-between px-5 pb-2 pt-4">
-                            <div className="font-bold text-[var(--c-text-title)]">自定义状态栏</div>
+                            <div className="font-bold text-[var(--c-text-title)]">{statusDialogScope === "offline" ? "自定义线下状态栏" : "自定义状态栏"}</div>
                             <div className="flex items-center gap-1.5">
                                 <button type="button" className="modal-header-btn modal-header-btn-muted" aria-label="状态栏方案" onClick={() => { setStatusSchemes(getSchemes(STATUS_SCHEME_TARGET)); setStatusSchemeDeleteId(null); setShowStatusSchemes(v => !v); }}><FolderOpen size={16} /></button>
                                 <button type="button" className="modal-header-btn modal-header-btn-muted" aria-label="导入状态栏" onClick={() => statusImportInputRef.current?.click()}><Upload size={16} /></button>
@@ -2250,7 +2323,9 @@ export function ChatSettingsPanel({
                                 onClick={() => {
                                     const contract = draftContract.trim();
                                     const renderHtml = draftRender.trim();
-                                    saveStatusRegion({ mode: contract && renderHtml ? "custom" : "off", contract, renderHtml, previewRaw: statusPreviewRaw });
+                                    const next: StatusRegionConfig = { mode: contract && renderHtml ? "custom" : "off", contract, renderHtml, previewRaw: statusPreviewRaw };
+                                    if (statusDialogScope === "offline") saveOfflineStatusRegion(next);
+                                    else saveStatusRegion(next);
                                     setShowStatusRegionDialog(false);
                                 }}
                             >

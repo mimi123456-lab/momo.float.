@@ -45,7 +45,7 @@ import { resolveChatAccountUserIdentity } from "./chat-scope-storage";
 import { buildChineseThinkingPrompt, withChineseThinkingPrompt } from "./chinese-thinking-prompt";
 import { assemblePromptPayload, applyOutputRegex, type LLMMessage, type LLMContentPart } from "./llm-prompt-assembler";
 import { MacroEngine, postProcessTrim } from "./macro-engine";
-import { getStatusRegionConfig, resolveStatusRegionSection, resolveStatusRegionExampleLine, resolveStatusRegionComposition, resolveStatusRegionFullExample } from "./chat-status-region";
+import { getStatusRegionConfig, getOfflineStatusRegionConfig, resolveStatusRegionSection, resolveStatusRegionExampleLine, resolveStatusRegionComposition, resolveStatusRegionFullExample, presetSupportsStatusRegion } from "./chat-status-region";
 import {
     buildProviderDebugMessages,
     buildProviderRequest,
@@ -1978,7 +1978,10 @@ export async function buildChatPromptMessages(
         ? buildChatBilingualInstruction(session.bilingualTranslationEnabled !== false, "single", session.bilingualTranslationPrompt)
         : "";
     // 状态区宏：按会话配置解析（native=原文/off=空/custom=契约）；群聊条目不含宏，不受影响
-    const statusRegionCfg = getStatusRegionConfig(session.id);
+    // 线下请求单独取线下配置（未单独设置时自动跟随线上）。
+    const statusRegionCfg = isOfflineMode
+        ? getOfflineStatusRegionConfig(session.id)
+        : getStatusRegionConfig(session.id);
     const offlineBilingualInstruction = !session.isGroup
         ? buildOfflineBilingualInstruction(
             session.bilingualTranslationEnabled !== false,
@@ -2036,6 +2039,22 @@ export async function buildChatPromptMessages(
         if (offlineStyle) {
             llmMessages.push({ role: "system", content: `## 线下文风要求\n${offlineStyle}` });
         }
+    }
+    // 预设里没有 {{statusRegionSection}} 宏时，状态区不会进提示词。
+    // 这种情况（自定义状态栏）补一条 system 契约，保证线上/线下都能稳定产出 [状态栏] 块。
+    if (
+        statusRegionCfg.mode === "custom"
+        && statusRegionCfg.contract.trim()
+        && !presetSupportsStatusRegion((preset?.prompts || []).map(item => item.content || ""))
+    ) {
+        llmMessages.push({
+            role: "system",
+            content: [
+                "## 状态栏输出（必须遵守）",
+                statusRegionCfg.contract.trim(),
+                "整块状态栏必须用 [状态栏] 与 [/状态栏] 包裹，放在每一轮正式聊天正文之前；字段之外的说明不要写进状态栏。",
+            ].join("\n"),
+        });
     }
     if (chineseThinkingEnabled) {
         llmMessages.push({ role: "system", content: buildChineseThinkingPrompt(

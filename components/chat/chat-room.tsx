@@ -18,7 +18,7 @@ import { StickerSearchSuggest } from "./sticker-search-suggest";
 import { StateValuesPanel } from "./state-values-panel";
 import { generateChatCompletion, generateOfflineChatCompletion, flattenCompletionResult, ChatEngineError } from "@/lib/chat-engine";
 import { formatOfflineTurnXml as formatOfflineTurnXmlShared, buildOfflinePromptHistory as buildOfflinePromptHistoryShared } from "@/lib/offline-prompt-builder";
-import { getStatusRegionConfig, isCustomStatusRegionActive, STATUS_REGION_UPDATED_EVENT } from "@/lib/chat-status-region";
+import { getStatusRegionConfig, getOfflineStatusRegionConfig, isCustomStatusRegionActive, STATUS_REGION_UPDATED_EVENT } from "@/lib/chat-status-region";
 import { CustomStatusFrame } from "@/components/chat/custom-status-frame";
 import { sendBrowserNotification } from "@/lib/browser-notification";
 import { dispatchChatMessageNotice } from "@/lib/chat-notification-events";
@@ -4446,6 +4446,9 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
     // 自定义状态栏：custom 生效时新消息盖戳，折叠区改走用户渲染代码；旧消息按原生渲染
     const statusRegionCfg = getStatusRegionConfig(session.id, !session.isGroup);
     const customStatusActive = isCustomStatusRegionActive(statusRegionCfg);
+    // 线下状态栏：可单独配置，未单独设置时跟随线上
+    const offlineStatusRegionCfg = getOfflineStatusRegionConfig(session.id, !session.isGroup);
+    const offlineCustomStatusActive = isCustomStatusRegionActive(offlineStatusRegionCfg);
 
     const formatOfflineTurnXml = useCallback((turn: ChatOfflineTurn): string => formatOfflineTurnXmlShared(turn), []);
 
@@ -4494,15 +4497,31 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
             const turn = visibleOfflineTurns[index];
             const display = offlineDisplayByTurnId.get(turn.id) ?? getOfflineDisplayText(turn);
             const content = display.assistantContent;
-            if (!content || !content.trim()) continue;
-            try {
-                const parsed = parseAIResponse(content, []);
-                if (parsed.statusPanel && parsed.statusPanel.trim()) return parsed.statusPanel;
-            } catch { /* 解析失败就不显示状态栏 */ }
+            // 状态栏可能被写在线下回复的 <content> 之外（比如紧跟 <thinking> 后面），
+            // 这里优先从原始输出里找，找不到再看解析后的正文。
+            const sources = [turn.rawText, content].filter((item): item is string => !!item && !!item.trim());
+            if (!sources.length) continue;
+            for (const source of sources) {
+                try {
+                    const parsed = parseAIResponse(source, []);
+                    if (parsed.statusPanel && parsed.statusPanel.trim()) return parsed.statusPanel;
+                } catch { /* 解析失败就试下一个来源 */ }
+            }
+            // 自定义状态栏没启用时，兜底用原生状态值 + 内心独白拼一条，避免线下完全空着。
+            if (!offlineCustomStatusActive) {
+                try {
+                    const parsed = parseAIResponse(sources[0], []);
+                    const values = parsed.stateValues.map(item => `[${item.name}:${item.value}]`).join("");
+                    const mono = parsed.innerMonologue && parsed.innerMonologue.trim()
+                        ? `[内心]${parsed.innerMonologue.trim()}[/内心]`
+                        : "";
+                    return [values, mono].filter(Boolean).join("\n");
+                } catch { /* ignore */ }
+            }
             return "";
         }
         return "";
-    }, [getOfflineDisplayText, offlineDisplayByTurnId, visibleOfflineTurns]);
+    }, [offlineCustomStatusActive, getOfflineDisplayText, offlineDisplayByTurnId, visibleOfflineTurns]);
 
     const loadMoreOfflineTurns = useCallback(() => {
         if (!hasMoreOfflineTurns) return;
@@ -6026,8 +6045,8 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
                     <div className="chat-offline-body">
                         {offlineStatusPanel && (
                             <div className="chat-status-bare">
-                                {customStatusActive && statusRegionCfg.renderHtml.trim() ? (
-                                    <CustomStatusFrame html={statusRegionCfg.renderHtml} raw={offlineStatusPanel} />
+                                {offlineCustomStatusActive && offlineStatusRegionCfg.renderHtml.trim() ? (
+                                    <CustomStatusFrame html={offlineStatusRegionCfg.renderHtml} raw={offlineStatusPanel} />
                                 ) : (
                                     <BilingualTextBlock text={offlineStatusPanel} mode="markdown" defaultExpanded={session.collapseBilingualTranslation !== false ? false : true} htmlFrameVariant="offline" />
                                 )}

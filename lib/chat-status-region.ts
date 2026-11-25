@@ -164,6 +164,39 @@ export function saveStatusRegionConfig(sessionId: string, config: StatusRegionCo
     window.dispatchEvent(new CustomEvent(STATUS_REGION_UPDATED_EVENT, { detail: { sessionId } }));
 }
 
+/** 线下状态栏用同一张表，键加后缀隔离；没单独设过就跟随线上配置。 */
+const OFFLINE_KEY_SUFFIX = "::offline";
+
+export function getOfflineStatusRegionConfig(sessionId: string, inheritGlobal = true): StatusRegionConfig {
+    const own = loadAll()[sessionId + OFFLINE_KEY_SUFFIX];
+    if (own) return normalizeConfig(own);
+    return getStatusRegionConfig(sessionId, inheritGlobal);
+}
+
+export function hasOwnOfflineStatusRegionConfig(sessionId: string): boolean {
+    return !!loadAll()[sessionId + OFFLINE_KEY_SUFFIX];
+}
+
+export function clearOfflineStatusRegionConfig(sessionId: string): void {
+    if (typeof window === "undefined") return;
+    const all = loadAll();
+    delete all[sessionId + OFFLINE_KEY_SUFFIX];
+    kvSet(STORAGE_KEY, JSON.stringify(all));
+    window.dispatchEvent(new CustomEvent(STATUS_REGION_UPDATED_EVENT, { detail: { sessionId } }));
+}
+
+export function saveOfflineStatusRegionConfig(sessionId: string, config: StatusRegionConfig): void {
+    if (typeof window === "undefined") return;
+    const all = loadAll();
+    if (config.mode === "native" && !config.contract.trim() && !config.renderHtml.trim()) {
+        delete all[sessionId + OFFLINE_KEY_SUFFIX];
+    } else {
+        all[sessionId + OFFLINE_KEY_SUFFIX] = config;
+    }
+    kvSet(STORAGE_KEY, JSON.stringify(all));
+    window.dispatchEvent(new CustomEvent(STATUS_REGION_UPDATED_EVENT, { detail: { sessionId } }));
+}
+
 /** custom 是否真正生效（契约与渲染都要有内容，缺一回退 native 行为） */
 export function isCustomStatusRegionActive(config: StatusRegionConfig): boolean {
     return config.mode === "custom" && !!config.contract.trim() && !!config.renderHtml.trim();
