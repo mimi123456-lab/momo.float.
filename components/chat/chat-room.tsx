@@ -30,6 +30,7 @@ import { createPortal } from "react-dom";
 
 import { CHARACTERS_UPDATED_EVENT, loadCharacters } from "@/lib/character-storage";
 import { runSummarizationPipeline } from "@/lib/memory-summarizer";
+import { setSessionOfflineMode } from "@/lib/chat-offline-mode";
 import { Character } from "@/lib/character-types";
 import { loadCustomAppChatPlusActions, type RegisteredCustomAppChatPlusAction } from "@/lib/custom-app-chat-directives";
 import { CUSTOM_APPS_UPDATED_EVENT, getInstalledCustomApp } from "@/lib/custom-app-storage";
@@ -4495,7 +4496,7 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
         setOfflineVisibleCount(OFFLINE_INITIAL_LOAD);
         const nextOffline = !offlineMode;
         setOfflineMode(nextOffline);
-        kvSet(CHAT_OFFLINE_MODE_PREFIX + session.id, nextOffline ? "1" : "0");
+        setSessionOfflineMode(session.id, nextOffline);
         if (!nextOffline) {
             // 退出线下：把这段线下见面写入该角色的长期记忆，线上从此「知道」发生过什么。
             const character = loadCharacters().find(item => item.id === session.contactId);

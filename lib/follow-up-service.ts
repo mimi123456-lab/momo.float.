@@ -18,7 +18,7 @@ import {
     getLatestCharacterStateValues,
 } from "./chat-storage";
 import type { ChatMessage, StateValue } from "./chat-storage";
-import { isSessionOfflineMode } from "./chat-offline-mode";
+import { shouldAllowOfflineOnlinePing } from "./chat-offline-ping";
 import { generateChatCompletion, flattenCompletionResult } from "./chat-engine";
 import { armFollowUpBailout, armIdleReconnectBailout, cancelBailoutKey, cancelBailoutPrefix, cancelFollowUpBailout, startBailoutHeartbeat } from "./push-bailout-client";
 import { isWithinPushQuietHours } from "./push-client";
@@ -235,8 +235,8 @@ export function scheduleFollowUp(sessionId: string, count: number, stateValues?:
 
 export async function requestBackgroundChatReply(sessionId: string): Promise<{ ok: boolean; skipped?: string }> {
     if (backgroundReplyFiringSet.has(sessionId)) return { ok: false, skipped: "already_running" };
-    // 线下模式期间不主动发线上消息。
-    if (isSessionOfflineMode(sessionId)) return { ok: false, skipped: "offline" };
+    // 线下模式期间默认不主动发线上消息；线下久无动静时放行一次提醒。
+    if (!shouldAllowOfflineOnlinePing(sessionId)) return { ok: false, skipped: "offline" };
     const session = loadChatSessions().find(s => s.id === sessionId);
     if (!session) return { ok: false, skipped: "missing_session" };
 
@@ -464,8 +464,8 @@ async function fireFollowUp(sched: { sessionId: string; count: number; delaySec?
         return;
     }
 
-    // 线下模式期间暂停追问，但保留预约：退出线下后会自然继续。
-    if (isSessionOfflineMode(sched.sessionId)) return;
+    // 线下模式期间暂停追问（久无动静时放行一次提醒），预约保留，退出线下后自然继续。
+    if (!shouldAllowOfflineOnlinePing(sched.sessionId)) return;
 
     firingSet.add(sched.sessionId);
     clearFollowUpSchedule(sched.sessionId); // clear before firing
@@ -622,8 +622,8 @@ function pollIdleReconnect(now: number) {
 }
 
 async function fireIdleReconnect(rule: IdleReconnectRule, lastUserAt: number) {
-    // 线下模式期间不发线上消息，等退出线下后按规则恢复。
-    if (isSessionOfflineMode(rule.sessionId)) return;
+    // 线下模式期间不发线上消息（久无动静时放行一次提醒），等退出线下后按规则恢复。
+    if (!shouldAllowOfflineOnlinePing(rule.sessionId)) return;
     idleReconnectFiringSet.add(rule.id);
     let backgroundController: AbortController | null = null;
     try {
@@ -688,8 +688,8 @@ async function fireIdleReconnect(rule: IdleReconnectRule, lastUserAt: number) {
 }
 
 async function fireTimedWake(sched: TimedWakeSchedule) {
-    // 线下模式期间不打扰：不删除预约，退出线下后仍会到点触发。
-    if (isSessionOfflineMode(sched.sessionId)) return;
+    // 线下模式期间不打扰（久无动静时放行一次提醒）：不删除预约，退出线下后仍会到点触发。
+    if (!shouldAllowOfflineOnlinePing(sched.sessionId)) return;
     timedWakeFiringSet.add(sched.id);
     let backgroundController: AbortController | null = null;
     removeTimedWakeSchedule(sched.id);
@@ -767,8 +767,8 @@ async function fireMenstrualPeriodCare(input: {
     characterId: string;
     event: MenstrualPeriodCareEvent;
 }) {
-    // 线下模式期间不打扰：不记为已触发，退出线下后仍会补发。
-    if (isSessionOfflineMode(input.sessionId)) return;
+    // 线下模式期间不打扰（久无动静时放行一次提醒）：不记为已触发，退出线下后仍会补发。
+    if (!shouldAllowOfflineOnlinePing(input.sessionId)) return;
     const firingKey = `${input.characterId}:${input.event.cycleKey}`;
     periodCareFiringSet.add(firingKey);
     let backgroundController: AbortController | null = null;

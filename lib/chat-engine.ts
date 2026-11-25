@@ -2,6 +2,7 @@
 
 import { createSseJsonParser } from "./sse-json";
 import { maybeAppendShortcutCapability } from "./offline-shortcut-capability";
+import { loadOfflineStylePrompt } from "./chat-offline-style";
 import { loadCharacters } from "./character-storage";
 import { buildScreenEffectPromptHint } from "./chat-screen-effects";
 import { emitChatPluginEvent, runChatPluginTransform } from "./chat-plugin-hooks";
@@ -2026,6 +2027,13 @@ export async function buildChatPromptMessages(
         offlineSummaryTag: preset?.story_summary_tag?.trim() || "summary",
         nativeToolHistory: usesNativeActions,
     });
+    // 线下模式专用文风：只在线下请求里追加，线上/剧情不受影响。
+    if (isOfflineMode) {
+        const offlineStyle = loadOfflineStylePrompt().trim();
+        if (offlineStyle) {
+            llmMessages.push({ role: "system", content: `## 线下文风要求\n${offlineStyle}` });
+        }
+    }
     if (chineseThinkingEnabled) {
         llmMessages.push({ role: "system", content: buildChineseThinkingPrompt(
             userIdentity?.name || "你", preset?.online_thinking_tag?.trim() || "thinking", [character.name],

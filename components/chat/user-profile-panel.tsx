@@ -42,6 +42,8 @@ import { armIdleReconnectBailout, armTimedWakeBailout, cancelBailoutKey, cancelB
 import { loadTimedWakeSchedules, makeTimedWakeId, removeTimedWakeSchedule, saveTimedWakeSchedule, type TimedWakeSchedule } from "@/lib/timed-wake-storage";
 import { IDLE_RECONNECT_MAX_CONSECUTIVE, loadIdleReconnectRules, removeIdleReconnectRule, upsertIdleReconnectRule, type IdleReconnectRule } from "@/lib/idle-reconnect-storage";
 import { addChatContact, createOrGetSession } from "@/lib/chat-storage";
+import { loadOfflinePingConfig, saveOfflinePingConfig, type OfflinePingConfig } from "@/lib/chat-offline-ping";
+import { loadOfflineStylePrompt, saveOfflineStylePrompt } from "@/lib/chat-offline-style";
 import { kvGet, kvSet, kvRemove } from "@/lib/kv-db";
 import { formatWalletAmount, getWalletBalance, loadWalletState, WALLET_UPDATED_EVENT } from "@/lib/wallet-storage";
 import { ChatFallbackAvatar } from "./chat-fallback-avatar";
@@ -181,6 +183,7 @@ function readScopedUserStats() {
 export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) {
     const [showFollowUpEditor, setShowFollowUpEditor] = useState(false);
     const [showCharacterProactive, setShowCharacterProactive] = useState(false);
+    const [showOfflineStyle, setShowOfflineStyle] = useState(false);
     const [showApiLog, setShowApiLog] = useState(false);
     const [showStickerManager, setShowStickerManager] = useState(false);
     const [showPluginManager, setShowPluginManager] = useState(false);
@@ -316,6 +319,9 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
     }
     if (showCharacterProactive) {
         return <CharacterProactiveEditor onBack={() => { window.dispatchEvent(new CustomEvent("chat-hide-tabbar", { detail: false })); setShowCharacterProactive(false); }} />;
+    }
+    if (showOfflineStyle) {
+        return <OfflineStyleEditor onBack={() => { window.dispatchEvent(new CustomEvent("chat-hide-tabbar", { detail: false })); setShowOfflineStyle(false); }} />;
     }
     if (showPushSettings) {
         return <OfflinePushSettingsPage onBack={() => { window.dispatchEvent(new CustomEvent("chat-hide-tabbar", { detail: false })); setShowPushSettings(false); }} />;
@@ -515,6 +521,14 @@ export function UserProfilePanel({ onClose, className }: UserProfilePanelProps) 
                             </div>
                             <ChevronRight size={16} className="text-[var(--c-icon)] opacity-50" />
                         </button>
+                        <button className="flex items-center gap-3 py-3.5 w-full border-t border-[color-mix(in_srgb,var(--c-card-border)_20%,transparent)]" onClick={() => { window.dispatchEvent(new CustomEvent("chat-hide-tabbar", { detail: true })); setShowOfflineStyle(true); }}>
+                            <MessageSquareDashed size={18} className="text-[var(--c-icon)] opacity-70" strokeWidth={1.25}/>
+                            <div className="flex flex-col flex-1 text-left gap-0.5">
+                                <span className="ts-14 font-semibold text-[var(--c-text-title)]">线下文风</span>
+                                <span className="ts-11 text-[var(--c-text)] opacity-70">只影响线下模式，线上与剧情不受影响</span>
+                            </div>
+                            <ChevronRight size={16} className="text-[var(--c-icon)] opacity-50" />
+                        </button>
                         <button className="flex items-center gap-3 py-3.5 w-full" onClick={() => { window.dispatchEvent(new CustomEvent("chat-hide-tabbar", { detail: true })); setShowPushSettings(true); }}>
                             <Satellite size={18} className="text-[var(--c-icon)] opacity-70" strokeWidth={1.25}/>
                             <div className="flex flex-col flex-1 text-left gap-0.5">
@@ -641,11 +655,19 @@ function ChatCSSEditor({ onBack }: { onBack: () => void }) {
 function FollowUpSettingsEditor({ onBack }: { onBack: () => void }) {
     const defaults = getDefaultFollowUpConfig();
     const [config, setConfig] = useState<FollowUpConfig>(defaults);
+    const [offlinePing, setOfflinePing] = useState<OfflinePingConfig>(() => loadOfflinePingConfig());
     const characters = loadCharacters();
 
     useEffect(() => {
         setConfig(loadFollowUpConfig());
+        setOfflinePing(loadOfflinePingConfig());
     }, []);
+
+    const updateOfflinePing = (patch: Partial<OfflinePingConfig>) => {
+        const next = { ...offlinePing, ...patch };
+        setOfflinePing(next);
+        saveOfflinePingConfig(next);
+    };
 
     const updateConfig = (patch: Partial<FollowUpConfig>) => {
         const next = { ...config, ...patch };
@@ -749,6 +771,39 @@ function FollowUpSettingsEditor({ onBack }: { onBack: () => void }) {
                     />
                 </div>
 
+                {/* 线下久无动静提醒 */}
+                <div className="menu-group">
+                    <div className="menu-item">
+                        <ProfileSettingsIcon icon={Clock} color={CONTENT_APP_ACCENTS.calendar} />
+                        <div className="menu-label-group">
+                            <span className="menu-label">线下久无动静线上提醒</span>
+                            <span className="menu-desc">线下安静超过设定时长，角色会回线上找你一次</span>
+                        </div>
+                        <Toggle checked={offlinePing.enabled} onChange={value => updateOfflinePing({ enabled: value })} />
+                    </div>
+                    {offlinePing.enabled && (
+                        <div className="menu-item">
+                            <ProfileSettingsIcon icon={Clock} color={BINDING_ACCENTS.voice} />
+                            <div className="menu-label-group">
+                                <span className="menu-label">安静时长</span>
+                                <span className="menu-desc">分钟（60=1小时，1440=1天）</span>
+                            </div>
+                            <input
+                                type="number"
+                                min={1}
+                                max={1440}
+                                value={offlinePing.minutes}
+                                onChange={event => {
+                                    const raw = Number(event.target.value);
+                                    if (!Number.isFinite(raw)) return;
+                                    updateOfflinePing({ minutes: Math.min(1440, Math.max(1, Math.round(raw))) });
+                                }}
+                                className="w-[84px] rounded-lg border border-[var(--c-card-border)] bg-transparent px-2 py-1 text-right ts-13 text-[var(--c-text)] outline-none"
+                            />
+                        </div>
+                    )}
+                </div>
+
                 {/* Reset button */}
                 <div className="menu-group">
                     <button className="menu-item" onClick={handleResetDefaults}>
@@ -849,6 +904,43 @@ function CharacterProactiveEditor({ onBack }: { onBack: () => void }) {
                             </div>
                         );
                     })}
+                </div>
+            </div>
+        </PageShell>
+    );
+}
+
+/* ══════════════════════════════════════════
+   线下文风（仅线下模式生效）
+   ══════════════════════════════════════════ */
+function OfflineStyleEditor({ onBack }: { onBack: () => void }) {
+    const [text, setText] = useState("");
+    const [saved, setSaved] = useState(false);
+
+    useEffect(() => { setText(loadOfflineStylePrompt()); }, []);
+
+    const handleSave = () => {
+        saveOfflineStylePrompt(text);
+        setSaved(true);
+        window.setTimeout(() => setSaved(false), 1500);
+    };
+
+    return (
+        <PageShell title="线下文风" onBack={onBack} className="absolute inset-0 z-[100]">
+            <div className="page-menu profile-settings-menu">
+                <p className="menu-group-desc mx-2">写下你希望的线下文风（例如：细腻克制、多动作描写、少用感叹号）。只在线下模式生效，线上与剧情不受影响。</p>
+                <div className="menu-group">
+                    <textarea
+                        value={text}
+                        onChange={event => setText(event.target.value)}
+                        placeholder="例如：第三人称、细腻白描，动作与对白比例均衡，不替用户决定心理和行动。"
+                        className="w-full min-h-[160px] resize-y rounded-xl border border-[var(--c-card-border)] bg-transparent p-3 ts-13 text-[var(--c-text)] outline-none"
+                    />
+                </div>
+                <div className="menu-group">
+                    <button className="menu-item" onClick={handleSave}>
+                        <div className="menu-label-group"><span className="menu-label">{saved ? "已保存" : "保存文风"}</span></div>
+                    </button>
                 </div>
             </div>
         </PageShell>
