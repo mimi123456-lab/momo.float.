@@ -171,7 +171,7 @@ export function VideoGenerationSettings() {
                 <div className="menu-item">
                     <span className="settings-tools-menu-copy">
                         <span className="menu-label appearance-menu-item-label">强制锁脸</span>
-                        <span className="menu-desc settings-tools-menu-desc">必须使用角色参考图；没有参考图会直接报错且不发起请求。此项目前固定开启。</span>
+                        <span className="menu-desc settings-tools-menu-desc">参考图取自「图像生成 API」里对应角色的角色参考图；聊天中由发消息的角色自动决定，这里不用选角色。没有参考图会直接报错且不发起请求。</span>
                     </span>
                     <span className="menu-right settings-tools-menu-toggle">
                         <Toggle checked={true} onChange={() => {}} disabled className="settings-toggle-control" />
@@ -180,7 +180,7 @@ export function VideoGenerationSettings() {
                 <div className="menu-item">
                     <span className="settings-tools-menu-copy">
                         <span className="menu-label appearance-menu-item-label">同时使用用户参考图</span>
-                        <span className="menu-desc settings-tools-menu-desc">把当前用户身份的参考图一起传给视频接口；缺用户参考图时会报错。</span>
+                        <span className="menu-desc settings-tools-menu-desc">用户参考图按该角色绑定的用户身份自动匹配（配置绑定 → 用户身份），缺图时会报错。</span>
                     </span>
                     <span className="menu-right settings-tools-menu-toggle">
                         <Toggle checked={settings.includeUserReference} onChange={(includeUserReference) => update({ includeUserReference })} className="settings-toggle-control" />
