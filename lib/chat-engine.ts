@@ -27,6 +27,9 @@ import {
 } from "./chat-storage";
 import { extractTextToolDirectiveText, stripTextToolDirectives } from "./text-tool-protocol";
 import { applyWithProtectedAvatarDecisionMarkers, findUserAvatarChangeIntent } from "./chat-avatar-intent";
+import { getSmsThread } from "./sms-storage";
+import { loadPhoneCallLogs } from "./phone-call-storage";
+import { coupleDaysTogether, loadCoupleSpace } from "./couple-space-storage";
 import type { ApiConfig, PresetConfig, Prompt, PromptOrderEntry, RegexConfig } from "./settings-types";
 import type { CustomAppPromptProfile } from "./custom-app-types";
 import {
@@ -2086,6 +2089,47 @@ export async function buildChatPromptMessages(
                 "已经开启情侣空间后不要再发这个标记。",
             ].join("\n"),
         });
+    }
+    if (!session.isGroup) {
+        const sharedFacts: string[] = [];
+        const smsThread = getSmsThread(session.contactId);
+        const recentSms = (smsThread?.messages || []).slice(-6);
+        if (recentSms.length > 0) {
+            sharedFacts.push([
+                "最近手机短信（你和用户之间，独立于微信）：",
+                ...recentSms.map(item => `${item.role === "user" ? (userIdentity?.name || "用户") : character.name}：${item.body}`),
+            ].join("\n"));
+        }
+        const recentCalls = loadPhoneCallLogs().filter(item => item.characterId === session.contactId).slice(0, 3);
+        if (recentCalls.length > 0) {
+            sharedFacts.push(`最近系统电话：${recentCalls.map(item => {
+                const label = item.type === "missed" ? "未接来电" : `已接通约 ${Math.max(1, Math.round(item.durationSec / 60))} 分钟`;
+                const transcript = item.transcript?.length ? `，你在电话里说：${item.transcript.join(" / ")}` : "";
+                return `${label}${transcript}`;
+            }).join("；")}`);
+        }
+        const coupleSpace = loadCoupleSpace(session.contactId);
+        if (coupleSpace) {
+            const days = coupleDaysTogether(coupleSpace.pairedAt);
+            const latestUserLetter = coupleSpace.letters.find(item => item.author === "user");
+            const latestCharacterLetter = coupleSpace.letters.find(item => item.author === "character");
+            const openWishes = coupleSpace.wishes.filter(item => !item.done).slice(0, 4)
+                .map(item => `「${item.body}」（${item.mood}，${item.author === "user" ? "对方" : "你"}写的）`);
+            sharedFacts.push([
+                `你们的情侣空间：在一起第 ${days} 天；`,
+                `你给对方的备注：${coupleSpace.remarks.characterToUser || "未设置"}；对方给你的备注：${coupleSpace.remarks.userToCharacter || "未设置"}；`,
+                `共同相册 ${coupleSpace.photos.length} 张${coupleSpace.photos.some(item => item.kind === "sneaky") ? "（其中有你偷拍对方的）" : ""}；`,
+                latestUserLetter ? `对方最近写的情书：「${latestUserLetter.body.slice(0, 80)}」；` : "",
+                latestCharacterLetter ? `你最近写的情书：「${latestCharacterLetter.body.slice(0, 80)}」；` : "",
+                openWishes.length > 0 ? `未完成的愿望：${openWishes.join("、")}。` : "",
+            ].filter(Boolean).join(""));
+        }
+        if (sharedFacts.length > 0) {
+            llmMessages.push({
+                role: "system",
+                content: `## 手机系统与情侣空间（与微信同步的真实信息）\n${sharedFacts.join("\n\n")}\n这些都是你已经知道的事实，不要在微信里假装不知道；除非用户主动提起，不要一次性全部复述。`,
+            });
+        }
     }
     if (avatarChangeIntent) {
         llmMessages.push({

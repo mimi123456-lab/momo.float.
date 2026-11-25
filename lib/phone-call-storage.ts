@@ -9,6 +9,8 @@ export type PhoneCallLog = {
     type: "outgoing" | "incoming" | "missed";
     startedAt: string;
     durationSec: number;
+    /** 通话里角色说过的关键台词，用于让微信侧的角色也知道电话内容。 */
+    transcript?: string[];
 };
 
 const CALL_LOG_KEY = "ai_phone_call_logs_v1";
@@ -39,6 +41,14 @@ export function addPhoneCallLog(input: Omit<PhoneCallLog, "id" | "startedAt"> & 
 
 export function clearPhoneCallLogs(): void {
     kvSet(CALL_LOG_KEY, "[]");
+}
+
+export function updatePhoneCallLog(id: string, patch: Partial<PhoneCallLog>): void {
+    const logs = loadPhoneCallLogs();
+    const index = logs.findIndex(item => item.id === id);
+    if (index < 0) return;
+    logs[index] = { ...logs[index], ...patch };
+    savePhoneCallLogs(logs);
 }
 
 /** 给角色生成一个稳定的“手机号”，优先用角色卡里的微信号（手机号格式）。 */

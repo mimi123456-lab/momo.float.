@@ -23,8 +23,10 @@ import {
     clearPhoneCallLogs,
     loadPhoneCallLogs,
     resolvePhoneNumber,
+    updatePhoneCallLog,
     type PhoneCallLog,
 } from "@/lib/phone-call-storage";
+import { generateCallLines } from "@/lib/phone-call-engine";
 import { createOrGetSession, pushChatMessage } from "@/lib/chat-storage";
 
 type PhoneTab = "favorites" | "recents" | "contacts" | "keypad" | "voicemail";
@@ -113,17 +115,26 @@ export function PhoneApp({ onClose, onNotice }: { onClose: () => void; onNotice?
 
     const numberFor = useCallback((character: Character) => resolvePhoneNumber(character.id, character.wechatID), []);
 
-    const syncCallToChat = useCallback((state: CallState, hangup: boolean) => {
+    const finishAnsweredCall = useCallback(async (state: CallState, logId: string) => {
+        const duration = formatDuration(state.seconds);
+        let lines: string[] = [];
+        try {
+            lines = await generateCallLines({
+                characterName: state.character.name,
+                persona: state.character.persona || state.character.personality || "",
+                durationSec: state.seconds,
+                direction: state.direction,
+            });
+        } catch { /* 生成失败时只同步通话记录 */ }
+        if (lines.length > 0) updatePhoneCallLog(logId, { transcript: lines });
         try {
             const session = createOrGetSession(state.character.id);
-            const text = hangup
-                ? `〔手机通话已结束〕和${state.character.name}通话 ${formatDuration(state.seconds)}`
-                : `〔手机来电〕${state.character.name}正在给你打电话`;
-            pushChatMessage({ sessionId: session.id, role: "system", content: text, mediaType: "tool_notice" });
-            if (hangup) {
-                window.dispatchEvent(new CustomEvent("ai-chat-request-reply", { detail: { sessionId: session.id } }));
-            }
-        } catch { /* 会话不可用时不阻塞通话 */ }
+            const content = lines.length > 0
+                ? `〔手机通话结束 · ${duration}〕电话里${state.character.name}说：\n${lines.map(line => `「${line}」`).join("\n")}`
+                : `〔手机通话结束〕和${state.character.name}通话 ${duration}`;
+            pushChatMessage({ sessionId: session.id, role: "system", content, mediaType: "tool_notice" });
+            window.dispatchEvent(new CustomEvent("ai-chat-request-reply", { detail: { sessionId: session.id } }));
+        } catch { /* 会话不可用时不阻塞 */ }
     }, []);
 
     const startCall = useCallback((character: Character) => {
@@ -135,17 +146,17 @@ export function PhoneApp({ onClose, onNotice }: { onClose: () => void; onNotice?
         const state = callRef.current;
         if (!state) return;
         const answered = state.phase === "active";
-        addPhoneCallLog({
+        const log = addPhoneCallLog({
             characterId: state.character.id,
             characterName: state.character.name,
             number: numberFor(state.character),
-            type: answered ? "outgoing" : "missed",
+            type: answered ? (state.direction === "incoming" ? "incoming" : "outgoing") : "missed",
             durationSec: state.seconds,
         });
         setLogs(loadPhoneCallLogs());
-        if (answered) syncCallToChat(state, true);
         setCall(null);
-    }, [numberFor, syncCallToChat]);
+        if (answered) void finishAnsweredCall(state, log.id);
+    }, [finishAnsweredCall, numberFor]);
 
     const answerCall = useCallback(() => {
         setCall(prev => prev ? { ...prev, phase: "active" } : prev);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 import { AppCustomCSS } from "@/components/ui/app-custom-css";
 import { Toggle } from "@/components/ui/form";
@@ -102,6 +102,16 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
     const [selectedCharacterId, setSelectedCharacterId] = useState("");
     const [generating, setGenerating] = useState(false);
     const [error, setError] = useState("");
+    const [forceMode, setForceMode] = useState(false);
+    const [watching, setWatching] = useState<{
+        characterId: string;
+        characterName: string;
+        logs: InspectLog[];
+        index: number;
+        finished: boolean;
+    } | null>(null);
+    const [chatHintSessionId, setChatHintSessionId] = useState<string | null>(null);
+    const syncedRef = useRef(false);
 
     useEffect(() => {
         const chars = loadCharacters();
@@ -132,13 +142,15 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
             setError("请先选择一个角色");
             return;
         }
-        if (!settings.enabled) {
-            setError("查岗已关闭，请先打开总开关");
-            return;
-        }
-        if (settings.allowedAppIds.length === 0) {
-            setError("请至少允许一个 App");
-            return;
+        if (!forceMode) {
+            if (!settings.enabled) {
+                setError("查岗已关闭，请先打开总开关");
+                return;
+            }
+            if (settings.allowedAppIds.length === 0) {
+                setError("请至少允许一个 App");
+                return;
+            }
         }
         setGenerating(true);
         setError("");
@@ -147,7 +159,7 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
                 characterId: character.id,
                 characterName: character.name,
                 persona: character.persona || character.personality || "",
-                allowedAppIds: settings.allowedAppIds,
+                allowedAppIds: forceMode ? [...INSPECT_APP_IDS] : settings.allowedAppIds,
             });
             if (plan.logs.length === 0) {
                 setError("TA 这次没有翻到什么");
@@ -163,13 +175,55 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
                 detail: action.detail,
             }));
             setLogs(loadInspectLogs());
-            syncInspectToChat(character.id, created.map(formatInspectRecord).join("\n\n"));
-            onNotice?.(`${character.name} 查岗了 ${created.length} 条记录`);
+            syncedRef.current = false;
+            setChatHintSessionId(null);
+            setWatching({ characterId: character.id, characterName: character.name, logs: created, index: 0, finished: false });
         } catch (err) {
             setError(err instanceof Error ? err.message : "查岗失败，请稍后再试");
         } finally {
             setGenerating(false);
         }
+    };
+
+    // 实时播放：一条一条翻给你看
+    useEffect(() => {
+        if (!watching || watching.finished) return;
+        const delay = watching.index === 0 ? 900 : 2000;
+        const timer = window.setTimeout(() => {
+            const nextIndex = watching.index + 1;
+            if (nextIndex >= watching.logs.length) {
+                if (!syncedRef.current) {
+                    syncedRef.current = true;
+                    const session = syncInspectToChat(watching.characterId, watching.logs.map(formatInspectRecord).join("\n\n"));
+                    window.dispatchEvent(new CustomEvent("ai-chat-request-reply", { detail: { sessionId: session.id } }));
+                    setChatHintSessionId(session.id);
+                }
+                setWatching({ ...watching, index: nextIndex, finished: true });
+                return;
+            }
+            setWatching({ ...watching, index: nextIndex });
+        }, delay);
+        return () => window.clearTimeout(timer);
+    }, [watching]);
+
+    const interruptWatch = () => {
+        const state = watching;
+        if (!state) return;
+        const seen = state.logs.slice(0, state.index);
+        const text = seen.length > 0
+            ? `〔查岗中断〕你突然把手机从${state.characterName}手里抽走，TA 只看了一半：\n${seen.map(formatInspectRecord).join("\n")}`
+            : `〔查岗中断〕你突然把手机从${state.characterName}手里抽走，TA 还没看到什么。`;
+        const session = syncInspectToChat(state.characterId, text);
+        window.dispatchEvent(new CustomEvent("ai-chat-request-reply", { detail: { sessionId: session.id } }));
+        setChatHintSessionId(session.id);
+        setWatching(null);
+        onNotice?.("已打断查岗，TA 在微信里说话了");
+    };
+
+    const openHintChat = () => {
+        if (!chatHintSessionId) return;
+        window.dispatchEvent(new CustomEvent("open-app", { detail: { appId: "chat", sessionId: chatHintSessionId } }));
+        setChatHintSessionId(null);
     };
 
     const handleConfront = (log: InspectLog) => {
@@ -302,6 +356,21 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
                                     <option key={character.id} value={character.id}>{character.name}</option>
                                 ))}
                             </select>
+                            <div style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                gap: 12,
+                                marginTop: 12,
+                                paddingTop: 12,
+                                borderTop: `1px solid ${DIVIDER}`,
+                            }}>
+                                <div style={{ minWidth: 0 }}>
+                                    <div style={{ fontSize: 12.4, fontWeight: 600, color: TEXT_MAIN }}>强制查岗</div>
+                                    <div style={{ marginTop: 3, fontSize: 11, color: TEXT_FAINT }}>无视上面的权限，TA 可以直接翻整台手机</div>
+                                </div>
+                                <Toggle checked={forceMode} onChange={setForceMode} />
+                            </div>
                             <button
                                 type="button"
                                 className="ui-btn"
@@ -315,7 +384,7 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
                                     boxShadow: "0 4px 14px rgba(95, 127, 118, 0.28)",
                                 }}
                             >
-                                {generating ? "正在翻看…" : "让 TA 现在查岗"}
+                                {generating ? "正在翻看…" : forceMode ? "强制查岗（实时）" : "让 TA 现在查岗（实时）"}
                             </button>
                             {error ? (
                                 <div style={{ marginTop: 8, fontSize: 11.5, color: "#b4544d", lineHeight: 1.5 }}>{error}</div>
@@ -393,6 +462,92 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
                     </div>
                 </div>
             </PageShell>
+
+            {chatHintSessionId ? (
+                <button
+                    type="button"
+                    onClick={openHintChat}
+                    style={{
+                        position: "absolute",
+                        left: 16,
+                        right: 16,
+                        bottom: "calc(env(safe-area-inset-bottom, 0px) + 16px)",
+                        border: "none",
+                        borderRadius: 14,
+                        padding: "12px 14px",
+                        background: "rgba(38, 48, 45, 0.94)",
+                        color: "#fff",
+                        fontSize: 12.6,
+                        textAlign: "left",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        boxShadow: "0 10px 26px rgba(0,0,0,0.25)",
+                    }}
+                >
+                    <span style={{ flex: 1 }}>TA 在微信里发来消息</span>
+                    <span style={{ fontSize: 12, color: "#bfe3d4", fontWeight: 600 }}>去聊天</span>
+                </button>
+            ) : null}
+
+            {watching ? (
+                <div style={{
+                    position: "absolute",
+                    inset: 0,
+                    background: "rgba(28, 36, 34, 0.42)",
+                    backdropFilter: "blur(3px)",
+                    display: "flex",
+                    alignItems: "flex-end",
+                    padding: 16,
+                    zIndex: 30,
+                }}>
+                    <div style={{
+                        width: "100%",
+                        borderRadius: 20,
+                        background: "var(--c-card-bg, #ffffff)",
+                        padding: 18,
+                        boxShadow: "0 18px 44px rgba(0,0,0,0.22)",
+                    }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ fontSize: 13, fontWeight: 600, color: TEXT_MAIN }}>
+                                {watching.finished ? "TA 看完了" : `TA 正在翻你的手机… ${Math.min(watching.index, watching.logs.length)}/${watching.logs.length}`}
+                            </span>
+                            <span style={{ marginLeft: "auto", fontSize: 11, color: TEXT_FAINT }}>{watching.characterName}</span>
+                        </div>
+                        <div style={{ marginTop: 10, height: 3, borderRadius: 2, background: "rgba(124,147,168,0.18)", overflow: "hidden" }}>
+                            <div style={{ width: `${Math.min(100, (watching.index / watching.logs.length) * 100)}%`, height: "100%", background: ACCENT, transition: "width 0.4s ease" }} />
+                        </div>
+                        <div style={{ marginTop: 14, minHeight: 74 }}>
+                            {watching.index === 0 ? (
+                                <div style={{ fontSize: 12.4, color: TEXT_SUB }}>TA 拿起你的手机，正在解锁…</div>
+                            ) : (
+                                watching.logs.slice(0, watching.index).slice(-1).map(log => (
+                                    <div key={log.id}>
+                                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                            <span style={{ fontSize: 10.5, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: log.kind === "view" ? "rgba(124,147,168,0.16)" : "rgba(95,127,118,0.18)", color: log.kind === "view" ? MIST : ACCENT_DEEP }}>
+                                                {log.kind === "view" ? "查看" : "改动"}
+                                            </span>
+                                            <span style={{ fontSize: 11.5, color: TEXT_SUB }}>{log.appLabel}</span>
+                                        </div>
+                                        <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.55, color: "#3d4f4b" }}>{log.summary}</div>
+                                        {log.detail ? <div style={{ marginTop: 5, fontSize: 11.5, lineHeight: 1.55, color: "#6b7a76", whiteSpace: "pre-wrap" }}>{log.detail}</div> : null}
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+                            {watching.finished ? (
+                                <>
+                                    <button type="button" onClick={() => setWatching(null)} style={softButtonStyle("#6f8188", "rgba(124,147,168,0.13)")}>关闭</button>
+                                    <button type="button" onClick={() => { setWatching(null); window.setTimeout(openHintChat, 60); }} disabled={!chatHintSessionId} style={{ ...softButtonStyle(ACCENT_DEEP, "rgba(95,127,118,0.16)"), flex: 1 }}>去聊天</button>
+                                </>
+                            ) : (
+                                <button type="button" onClick={interruptWatch} style={{ ...softButtonStyle("#b4544d", "rgba(180,84,77,0.12)"), flex: 1 }}>打断 TA</button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            ) : null}
         </div>
     );
 }
