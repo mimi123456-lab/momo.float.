@@ -1150,6 +1150,11 @@ function finalizeStreamToolCalls(drafts: Map<number, StreamToolCallDraft>): { ca
     return { calls, truncatedNames };
 }
 
+/** 部分中转站会让上游自行选择内部路由函数（如 transfer_to_agent），客户端无法声明，直接 400。 */
+function isUndeclaredToolFunctionError(text: string): boolean {
+    return /undeclared or disallowed function/i.test(text) || /transfer_to_agent/i.test(text);
+}
+
 export async function sendLLMToolStreamRequest(
     config: ApiConfig,
     preset: PresetConfig | null,
@@ -1185,11 +1190,22 @@ export async function sendLLMToolStreamRequest(
     const firedToolCallStarts = new Set<number>();
 
     try {
-        const response = await fetchLlmPayload(request, { signal: llmAbort.signal });
+        let response = await fetchLlmPayload(request, { signal: llmAbort.signal });
 
         if (!response.ok) {
             const errorText = await response.text();
-            throw new ChatEngineError(`API Tool Stream Error ${response.status}: ${errorText}`);
+            // 上游选了未声明的路由函数时，去掉工具重试一次；否则用户会完全收不到回复。
+            if (tools.length > 0 && isUndeclaredToolFunctionError(errorText)) {
+                console.warn("[ChatEngine] Upstream undeclared tool function, retrying without tools:", errorText.slice(0, 300));
+                const retryRequest = buildProviderRequest(config, effectivePreset, afterPlugins.messages, { tools: [], stream: true, maxTokens: options?.maxTokens });
+                response = await fetchLlmPayload(retryRequest, { signal: llmAbort.signal });
+                if (!response.ok) {
+                    const retryError = await response.text();
+                    throw new ChatEngineError(`API Tool Stream Error ${response.status}: ${retryError}`);
+                }
+            } else {
+                throw new ChatEngineError(`API Tool Stream Error ${response.status}: ${errorText}`);
+            }
         }
         if (!response.body) throw new ChatEngineError("原生动作流式响应没有 body。");
 
@@ -1333,11 +1349,22 @@ export async function sendLLMToolRequest(
     const detachExternalAbort = attachExternalAbort(llmAbort, options?.signal);
 
     try {
-        const response = await fetchLlmPayload(request, { signal: llmAbort.signal });
+        let response = await fetchLlmPayload(request, { signal: llmAbort.signal });
 
         if (!response.ok) {
             const errorText = await response.text();
-            throw new ChatEngineError(`API Tool Error ${response.status}: ${errorText}`);
+            // 同上：去掉工具重试一次，避免中转站的路由型上游直接 400。
+            if (tools.length > 0 && isUndeclaredToolFunctionError(errorText)) {
+                console.warn("[ChatEngine] Upstream undeclared tool function, retrying without tools:", errorText.slice(0, 300));
+                const retryRequest = buildProviderRequest(config, effectivePreset, afterPlugins.messages, { tools: [] });
+                response = await fetchLlmPayload(retryRequest, { signal: llmAbort.signal });
+                if (!response.ok) {
+                    const retryError = await response.text();
+                    throw new ChatEngineError(`API Tool Error ${response.status}: ${retryError}`);
+                }
+            } else {
+                throw new ChatEngineError(`API Tool Error ${response.status}: ${errorText}`);
+            }
         }
 
         const data = await response.json();
