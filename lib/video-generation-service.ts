@@ -13,7 +13,7 @@ import {
 } from "./settings-storage";
 import type { VideoGenerationSettings, VideoPreset } from "./settings-types";
 import { pollVideoDirect, submitVideoDirect, type DirectSubmitInput } from "./video-generation-direct";
-import { canHostReferenceImages, toPublicImageUrl } from "./reference-image-hosting";
+import { isHttpUrl, toPublicMediaUrl } from "./reference-image-hosting";
 
 const DAILY_COUNTER_KEY = "ai_phone_video_generation_daily_v1";
 const MAX_MOTION_REFERENCE_BYTES = 8 * 1024 * 1024;
@@ -235,23 +235,24 @@ async function prepareRequest(
             : "",
     ].filter(Boolean).join("\n\n");
 
-    // 火山/Seedance 官转只收公网 URL 参考图，base64 会被上游拒绝。
-    // 配置了图床时先换成公网链接；未配置则保持 base64，交给服务商决定。
-    const hosting = imageSettings.imageHosting;
+    // 火山/Seedance 官转只收公网 URL 的参考素材，base64 会被上游直接拒绝。
+    // 配了 COS（图片/视频都行）或 ImgBB（仅图片）时先换成公网链接；都没有则保持 base64。
+    const mediaOptions = { cos: settings.cos, imageHosting: imageSettings.imageHosting };
     let characterReferenceOut = firstFrame;
     let userReferenceOut = usedUserReference && !attachUserToFrame ? userReferenceDataUrl : "";
-    if (canHostReferenceImages(hosting) && characterReferenceOut && !/^https?:\/\//i.test(characterReferenceOut)) {
+    let motionReferenceOut = motionReference;
+    const promote = async (value: string, kind: "image" | "video"): Promise<string> => {
+        if (!value || isHttpUrl(value)) return value;
         try {
-            characterReferenceOut = await toPublicImageUrl(characterReferenceOut, "character-ref", hosting);
-            if (userReferenceOut) {
-                userReferenceOut = await toPublicImageUrl(userReferenceOut, "user-ref", hosting);
-            }
+            return await toPublicMediaUrl(value, { ...mediaOptions, kind });
         } catch (error) {
-            console.warn("[VideoGeneration] 参考图上传图床失败，回退 base64：", error);
-            characterReferenceOut = firstFrame;
-            userReferenceOut = usedUserReference && !attachUserToFrame ? userReferenceDataUrl : "";
+            console.warn(`[VideoGeneration] 参考${kind === "video" ? "视频" : "图"}上传失败，回退原值：`, error);
+            return value;
         }
-    }
+    };
+    characterReferenceOut = await promote(characterReferenceOut, "image");
+    userReferenceOut = await promote(userReferenceOut, "image");
+    motionReferenceOut = await promote(motionReferenceOut, "video");
 
     return {
         settings,
@@ -259,9 +260,9 @@ async function prepareRequest(
         prompt: preset.extraPrompt.trim() ? `${prompt}\n\n${preset.extraPrompt.trim()}` : prompt,
         characterReferenceDataUrl: characterReferenceOut,
         userReferenceDataUrl: userReferenceOut,
-        motionReference,
+        motionReference: motionReferenceOut,
         usedUserReference,
-        usedMotionReference: Boolean(motionReference),
+        usedMotionReference: Boolean(motionReferenceOut),
     };
 }
 

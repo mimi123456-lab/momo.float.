@@ -348,6 +348,21 @@ export type VideoGenerationSettings = {
     maxDailyGenerations: number;
     /** 单次任务最长等待秒数。 */
     timeoutSeconds: number;
+    /** 腾讯 COS：把本地参考图/参考视频传成公网 URL（火山系只收 URL）。 */
+    cos: CosUploadSettings;
+};
+
+/** 腾讯云 COS 直传配置；浏览器先取签名再 PUT，绕开部署平台请求体上限。 */
+export type CosUploadSettings = {
+    enabled: boolean;
+    secretId: string;
+    secretKey: string;
+    /** 形如 momo-1250000000 */
+    bucket: string;
+    /** 形如 ap-guangzhou */
+    region: string;
+    /** 对象键前缀，默认 momo */
+    prefix: string;
 };
 
 // --- Configuration Binding System ---

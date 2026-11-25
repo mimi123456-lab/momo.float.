@@ -509,6 +509,68 @@ export function VideoGenerationSettings() {
             </div>
 
             <div className="menu-group p-4 flex flex-col gap-4">
+                <div className="menu-item" style={{ padding: 0 }}>
+                    <span className="settings-tools-menu-copy">
+                        <span className="menu-label appearance-menu-item-label">腾讯 COS 直传（参考素材换公网 URL）</span>
+                        <span className="menu-desc settings-tools-menu-desc">火山系只收公网 URL 的参考图/参考视频。开启后本地素材先直传 COS 再发送，视频不受体积限制；桶需设为公有读，并给本站域名配 CORS（允许 PUT、Authorization 头）。</span>
+                    </span>
+                    <span className="menu-right settings-tools-menu-toggle">
+                        <Toggle
+                            checked={settings.cos.enabled}
+                            onChange={(enabled) => update({ cos: { ...settings.cos, enabled } })}
+                            className="settings-toggle-control"
+                        />
+                    </span>
+                </div>
+                {settings.cos.enabled && (
+                    <>
+                        <div className="flex flex-col gap-1">
+                            <label className="menu-desc ml-1">SecretId</label>
+                            <Input
+                                value={settings.cos.secretId}
+                                placeholder="AKID..."
+                                onChange={(event) => update({ cos: { ...settings.cos, secretId: event.target.value } })}
+                            />
+                        </div>
+                        <div className="flex flex-col gap-1">
+                            <label className="menu-desc ml-1">SecretKey</label>
+                            <Input
+                                value={settings.cos.secretKey}
+                                placeholder="仅存在本机浏览器"
+                                onChange={(event) => update({ cos: { ...settings.cos, secretKey: event.target.value } })}
+                            />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            <div className="flex flex-col gap-1">
+                                <label className="menu-desc ml-1">Bucket（含 APPID）</label>
+                                <Input
+                                    value={settings.cos.bucket}
+                                    placeholder="momo-1250000000"
+                                    onChange={(event) => update({ cos: { ...settings.cos, bucket: event.target.value } })}
+                                />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                <label className="menu-desc ml-1">Region</label>
+                                <Input
+                                    value={settings.cos.region}
+                                    placeholder="ap-guangzhou"
+                                    onChange={(event) => update({ cos: { ...settings.cos, region: event.target.value } })}
+                                />
+                            </div>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                            <label className="menu-desc ml-1">对象键前缀</label>
+                            <Input
+                                value={settings.cos.prefix}
+                                placeholder="momo"
+                                onChange={(event) => update({ cos: { ...settings.cos, prefix: event.target.value } })}
+                            />
+                        </div>
+                    </>
+                )}
+            </div>
+
+            <div className="menu-group p-4 flex flex-col gap-4">
                 <div className="grid grid-cols-2 gap-2">
                     <div className="flex flex-col gap-1">
                         <label className="menu-desc ml-1">每日最多生成条数（0=不限）</label>

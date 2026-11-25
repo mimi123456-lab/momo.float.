@@ -955,6 +955,14 @@ export const DEFAULT_VIDEO_GENERATION_SETTINGS: VideoGenerationSettings = {
     includeUserReference: true,
     maxDailyGenerations: 10,
     timeoutSeconds: 300,
+    cos: {
+        enabled: false,
+        secretId: "",
+        secretKey: "",
+        bucket: "",
+        region: "ap-guangzhou",
+        prefix: "momo",
+    },
 };
 
 function normalizeVideoPreset(preset: Partial<VideoPreset> | null | undefined, index: number): VideoPreset {
@@ -1017,6 +1025,18 @@ function normalizeVideoGenerationSettings(settings: Partial<VideoGenerationSetti
             : undefined,
         maxDailyGenerations: Number.isFinite(maxDaily) ? Math.min(999, Math.max(0, maxDaily)) : DEFAULT_VIDEO_GENERATION_SETTINGS.maxDailyGenerations,
         timeoutSeconds: Number.isFinite(timeout) ? Math.min(900, Math.max(60, timeout)) : DEFAULT_VIDEO_GENERATION_SETTINGS.timeoutSeconds,
+        cos: {
+            enabled: settings?.cos?.enabled === true,
+            secretId: typeof settings?.cos?.secretId === "string" ? settings.cos.secretId.trim() : "",
+            secretKey: typeof settings?.cos?.secretKey === "string" ? settings.cos.secretKey.trim() : "",
+            bucket: typeof settings?.cos?.bucket === "string" ? settings.cos.bucket.trim() : "",
+            region: typeof settings?.cos?.region === "string" && settings.cos.region.trim()
+                ? settings.cos.region.trim()
+                : DEFAULT_VIDEO_GENERATION_SETTINGS.cos.region,
+            prefix: typeof settings?.cos?.prefix === "string" && settings.cos.prefix.trim()
+                ? settings.cos.prefix.trim().replace(/^\/+|\/+$/g, "")
+                : DEFAULT_VIDEO_GENERATION_SETTINGS.cos.prefix,
+        },
     };
 }
 
