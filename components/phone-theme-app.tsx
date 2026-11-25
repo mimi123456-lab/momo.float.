@@ -1199,12 +1199,29 @@ function GlobalCSSPage({
 function AppCSSPage({ onNotice }: { onNotice: (text: string) => void }) {
   const [target, setTarget] = useState<AppCssTargetId>("music");
   const [draftCss, setDraftCss] = useState(() => (typeof window === "undefined" ? "" : loadAppCustomCSS("music")));
+  const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setDraftCss(loadAppCustomCSS(target));
   }, [target]);
 
   const meta = APP_CSS_TARGETS.find(item => item.id === target);
+
+  const handleImportFile = useCallback((file: File | undefined) => {
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".css")) {
+      onNotice("只支持 .css 文件");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = String(reader.result || "");
+      setDraftCss(text);
+      onNotice(`已导入 ${file.name}（${text.length} 字符），检查一下点保存生效`);
+    };
+    reader.onerror = () => onNotice("读取文件失败");
+    reader.readAsText(file);
+  }, [onNotice]);
 
   return (
     <div className="theme-section-page">
@@ -1234,9 +1251,20 @@ function AppCSSPage({ onNotice }: { onNotice: (text: string) => void }) {
         spellCheck={false}
       />
       <div className="flex gap-2 mt-3 items-center">
+        <button type="button" className="ui-btn ui-btn-outline" onClick={() => fileRef.current?.click()}>
+          <Upload size={14} strokeWidth={1.8} />
+          导入 CSS 文件
+        </button>
         <button type="button" className="ui-btn ui-btn-outline flex-1" onClick={() => { setDraftCss(""); saveAppCustomCSS(target, ""); onNotice("已清空该 App 的自定义 CSS"); }}>清除</button>
         <button type="button" className="ui-btn ui-btn-soft-action flex-1" onClick={() => { saveAppCustomCSS(target, draftCss); onNotice(`已保存 ${meta?.label ?? ""} 外观`); }}>保存</button>
       </div>
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".css"
+        className="hidden"
+        onChange={(e) => { handleImportFile(e.target.files?.[0]); e.target.value = ""; }}
+      />
     </div>
   );
 }
