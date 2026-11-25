@@ -12,6 +12,7 @@ import {
     resolveActiveVideoPreset,
 } from "./settings-storage";
 import type { VideoGenerationSettings, VideoPreset } from "./settings-types";
+import { pollVideoDirect, submitVideoDirect, type DirectSubmitInput } from "./video-generation-direct";
 
 const DAILY_COUNTER_KEY = "ai_phone_video_generation_daily_v1";
 const MAX_MOTION_REFERENCE_BYTES = 8 * 1024 * 1024;
@@ -99,14 +100,8 @@ export function getVideoGenerationDailyUsage(): { used: number; limit: number } 
 export function isVideoGenerationConfigured(): boolean {
     const settings = loadVideoGenerationSettings();
     if (!settings.enabled) return false;
-    const preset = settings.presets.find(item => item.id === settings.activePresetId) || settings.presets[0];
-    if (!preset?.model?.trim() || !preset.baseUrl?.trim()) return false;
-    if (settings.inheritImageApi) {
-        const image = loadImageGenerationSettings();
-        const imagePreset = image.openaiPresets?.find(item => item.id === image.activeOpenAiPresetId) || image.openaiPresets?.[0];
-        return Boolean(imagePreset?.baseUrl?.trim() && imagePreset?.apiKey?.trim());
-    }
-    return Boolean(preset.apiKey?.trim());
+    const preset = resolveActiveVideoPreset(settings);
+    return Boolean(preset?.model?.trim() && preset?.baseUrl?.trim() && preset?.apiKey?.trim());
 }
 
 export async function fetchVideoGenerationModels(preset: Pick<VideoPreset, "apiKey" | "baseUrl">): Promise<string[]> {
@@ -314,10 +309,29 @@ function videoApiRequestBody(prepared: PreparedRequest) {
         imageField: preset.imageField || "image",
         extraBody: parseExtraParams(preset.extraParams),
         endpointMode: preset.endpointMode,
+        direct: prepared.settings.directMode !== false,
     };
 }
 
+async function requestDirect(payload: Record<string, unknown>, signal?: AbortSignal): Promise<VideoApiState> {
+    const input = payload as unknown as DirectSubmitInput & { action?: string; taskId?: string };
+    if (input.action === "poll") {
+        return pollVideoDirect(input, input.taskId || "", signal);
+    }
+    return submitVideoDirect(input, signal);
+}
+
 async function requestServer(payload: Record<string, unknown>, signal?: AbortSignal): Promise<VideoApiState> {
+    // 直连优先：Vercel 等平台对函数请求体有 4.5MB 硬限制，带参考视频时会被 413。
+    // 跨域/网络失败只回退到服务端代理，HTTP 业务错误不回退，避免重复提交计费。
+    if (payload.direct === true) {
+        try {
+            return await requestDirect(payload, signal);
+        } catch (error) {
+            if (!(error instanceof TypeError)) throw error;
+            console.warn("[VideoGeneration] 直连中转站失败，回退服务端代理：", error.message);
+        }
+    }
     const response = await fetch("/api/video-generation", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -419,6 +433,15 @@ export async function generateVideoFromConfiguredApi(params: {
         );
         motionReferenceSkipped = true;
     }
+    // 直连时 413 会以 failed 状态返回（不抛错），同样去掉动作参考重试一次。
+    if (submitState.status === "failed" && prepared.motionReference && /413|too large|请求体过大/i.test(submitState.error || "")) {
+        console.warn("[VideoGeneration] 中转站拒绝超大请求，改为不带动作参考重试");
+        submitState = await requestServer(
+            videoApiRequestBody({ ...prepared, motionReference: "", usedMotionReference: false }),
+            params.signal,
+        );
+        motionReferenceSkipped = true;
+    }
     let videoUrl = "";
     if (submitState.status === "succeeded" && submitState.videoUrl) {
         videoUrl = submitState.videoUrl;
@@ -436,6 +459,7 @@ export async function generateVideoFromConfiguredApi(params: {
                 baseUrl: prepared.preset.baseUrl,
                 apiKey: prepared.preset.apiKey,
                 taskId,
+                direct: prepared.settings.directMode !== false,
             }, params.signal);
             if (state.status === "succeeded" && state.videoUrl) {
                 videoUrl = state.videoUrl;

@@ -186,6 +186,15 @@ export function VideoGenerationSettings() {
                 </div>
                 <div className="menu-item">
                     <span className="settings-tools-menu-copy">
+                        <span className="menu-label appearance-menu-item-label">浏览器直连中转站</span>
+                        <span className="menu-desc settings-tools-menu-desc">请求由手机直接发往中转站，绕开 Vercel 4.5MB 请求体限制；跨域失败会自动回退服务端代理。带参考视频时需要开启。</span>
+                    </span>
+                    <span className="menu-right settings-tools-menu-toggle">
+                        <Toggle checked={settings.directMode} onChange={(directMode) => update({ directMode })} className="settings-toggle-control" />
+                    </span>
+                </div>
+                <div className="menu-item">
+                    <span className="settings-tools-menu-copy">
                         <span className="menu-label appearance-menu-item-label">强制锁脸</span>
                         <span className="menu-desc settings-tools-menu-desc">参考图取自「图像生成 API」里对应角色的角色参考图；聊天中由发消息的角色自动决定，这里不用选角色。没有参考图会直接报错且不发起请求。</span>
                     </span>

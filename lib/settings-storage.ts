@@ -947,6 +947,7 @@ export const DEFAULT_VIDEO_PRESET: VideoPreset = {
 
 export const DEFAULT_VIDEO_GENERATION_SETTINGS: VideoGenerationSettings = {
     enabled: false,
+    directMode: true,
     inheritImageApi: false,
     presets: [DEFAULT_VIDEO_PRESET],
     activePresetId: DEFAULT_VIDEO_PRESET.id,
@@ -996,6 +997,7 @@ function normalizeVideoGenerationSettings(settings: Partial<VideoGenerationSetti
     const timeout = Math.round(Number(settings?.timeoutSeconds));
     return {
         enabled: settings?.enabled === true,
+        directMode: settings?.directMode !== false,
         inheritImageApi: settings?.inheritImageApi === true,
         inheritImagePresetId: typeof settings?.inheritImagePresetId === "string" && settings.inheritImagePresetId.trim()
             ? settings.inheritImagePresetId.trim()

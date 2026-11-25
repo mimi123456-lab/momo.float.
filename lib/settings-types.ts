@@ -327,6 +327,8 @@ export type VideoPreset = {
 
 export type VideoGenerationSettings = {
     enabled: boolean;
+    /** 浏览器直连中转站：绕过部署平台（如 Vercel 4.5MB）的请求体上限。 */
+    directMode: boolean;
     /** 直接复用生图页的中转站地址与 Key；模型仍用视频预设里的。 */
     inheritImageApi: boolean;
     /** 为空时跟随生图当前激活预设。 */
