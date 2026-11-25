@@ -47,7 +47,7 @@ function generatedVideoFilename(description: string): string {
 export async function generateAndApplyChatGeneratedVideo(
     message: ChatMessage,
     characterId?: string,
-    options?: { signal?: AbortSignal; description?: string; durationSeconds?: number },
+    options?: { signal?: AbortSignal; description?: string; durationSeconds?: number; motionReferenceRef?: string },
 ): Promise<ChatMessage> {
     const previousDescription = message.mediaData?.label?.trim() || "";
     const description = (options?.description ?? previousDescription).trim();
@@ -71,6 +71,7 @@ export async function generateAndApplyChatGeneratedVideo(
             characterId,
             appId: "chat",
             durationSeconds: options?.durationSeconds,
+            motionReferenceRef: options?.motionReferenceRef,
             signal: options?.signal,
         });
         const fileName = generatedVideoFilename(description);

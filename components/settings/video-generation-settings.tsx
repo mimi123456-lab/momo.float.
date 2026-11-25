@@ -132,6 +132,7 @@ export function VideoGenerationSettings() {
                     prompt: "测试：一个角色站在窗边对着镜头挥手，固定机位，半身景",
                     duration: activePreset.duration,
                     ratio: activePreset.ratio,
+                    resolution: activePreset.resolution,
                     endpointMode: activePreset.endpointMode,
                 }),
             });
@@ -280,7 +281,7 @@ export function VideoGenerationSettings() {
                                 </Select>
                             )}
                         </div>
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid grid-cols-2 gap-2">
                             <div className="flex flex-col gap-1">
                                 <label className="menu-desc ml-1">时长（秒）</label>
                                 <Input
@@ -299,8 +300,18 @@ export function VideoGenerationSettings() {
                                     <option value="1:1">1:1</option>
                                 </Select>
                             </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
                             <div className="flex flex-col gap-1">
-                                <label className="menu-desc ml-1">端点风格</label>
+                                <label className="menu-desc ml-1">分辨率（New API 系必填）</label>
+                                <Select value={activePreset.resolution} onChange={(event) => updatePreset({ resolution: event.target.value })}>
+                                    <option value="480p">480p</option>
+                                    <option value="720p">720p</option>
+                                    <option value="1080p">1080p</option>
+                                </Select>
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                <label className="menu-desc ml-1">端点风格（iliu.ai 选自动）</label>
                                 <Select value={activePreset.endpointMode} onChange={(event) => updatePreset({ endpointMode: event.target.value as VideoPreset["endpointMode"] })}>
                                     <option value="auto">自动尝试</option>
                                     <option value="generations">/videos/generations</option>

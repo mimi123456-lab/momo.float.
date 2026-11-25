@@ -304,6 +304,8 @@ export type VideoPreset = {
     /** 单条视频时长（秒），5~13。 */
     duration: number;
     ratio: VideoAspectRatio;
+    /** 视频分辨率，New API 系中转站必填（如 480p / 720p / 1080p）。 */
+    resolution: string;
     /** 提交/轮询端点风格；auto 会依次尝试。 */
     endpointMode: VideoGenerationEndpointMode;
     extraPrompt: string;

@@ -2896,7 +2896,24 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
         if (!isPendingChatGeneratedVideoMessage(message)) return Promise.resolve(null);
         // 线下模式禁止富媒体，指令不触发视频生成。
         if (offlineMode) return Promise.resolve(null);
-        return generateAndApplyChatGeneratedVideo(message, characterId || session.contactId, { signal: guard?.signal })
+        // 用户最近 10 分钟内发的视频，自动作为这次生成的动作参考（中转站支持时生效）。
+        const motionReferenceRef = (() => {
+            for (let index = messages.length - 1; index >= 0; index -= 1) {
+                const item = messages[index];
+                if (item.id === message.id) continue;
+                if (item.role !== "user") continue;
+                if (item.mediaType !== "media_file" || item.mediaData?.fileType !== "video") continue;
+                if (!item.mediaUrl?.startsWith("media-store://")) continue;
+                const createdAt = item.createdAt ? Date.parse(item.createdAt) : NaN;
+                if (Number.isFinite(createdAt) && Date.now() - createdAt > 10 * 60 * 1000) continue;
+                return item.mediaUrl;
+            }
+            return undefined;
+        })();
+        return generateAndApplyChatGeneratedVideo(message, characterId || session.contactId, {
+            signal: guard?.signal,
+            motionReferenceRef,
+        })
             .then(updated => updated)
             .catch(error => {
                 if (!isAbortLikeError(error)) {

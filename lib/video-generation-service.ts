@@ -115,6 +115,15 @@ function blobToDataUrl(blob: Blob): Promise<string> {
     });
 }
 
+async function loadMotionReferenceRef(ref: string): Promise<string> {
+    const loaded = await loadMediaBlob(ref);
+    if (!loaded) throw new VideoGenerationFailure("FAILED", "参考视频已失效，请重新上传");
+    if (loaded.blob.size > MAX_MOTION_REFERENCE_BYTES) {
+        throw new VideoGenerationFailure("MOTION_TOO_LARGE", "参考视频超过 8MB，无法作为动作参考，请压缩后再发");
+    }
+    return blobToDataUrl(loaded.blob);
+}
+
 async function resolveMotionReference(settings: VideoGenerationSettings, preset: VideoPreset): Promise<string> {
     if (!preset.supportsMotionReference) {
         if (settings.motionReferenceRef || settings.motionReferenceUrl) {
@@ -125,18 +134,14 @@ async function resolveMotionReference(settings: VideoGenerationSettings, preset:
     if (settings.motionReferenceUrl?.trim()) return settings.motionReferenceUrl.trim();
     const ref = settings.motionReferenceRef?.trim();
     if (!ref) return "";
-    const loaded = await loadMediaBlob(ref);
-    if (!loaded) throw new VideoGenerationFailure("FAILED", "参考视频已失效，请重新上传");
-    if (loaded.blob.size > MAX_MOTION_REFERENCE_BYTES) {
-        throw new VideoGenerationFailure("MOTION_TOO_LARGE", "参考视频超过 8MB，请压缩后再上传，或改用视频链接");
-    }
-    return blobToDataUrl(loaded.blob);
+    return loadMotionReferenceRef(ref);
 }
 
 async function prepareRequest(
     description: string,
     characterId: string | undefined,
     appId: string,
+    motionReferenceOverride?: string,
 ): Promise<PreparedRequest> {
     const settings = loadVideoGenerationSettings();
     if (!settings.enabled) throw new VideoGenerationFailure("DISABLED", "视频生成未启用");
@@ -185,7 +190,9 @@ async function prepareRequest(
     const characterReferenceDataUrl = characterRaw
         ? await normalizeReferenceImageForEdit(characterRaw, characterRef?.faceCrop)
         : "";
-    const motionReference = await resolveMotionReference(settings, preset);
+    const motionReference = motionReferenceOverride
+        ? (preset.supportsMotionReference ? await loadMotionReferenceRef(motionReferenceOverride) : "")
+        : await resolveMotionReference(settings, preset);
 
     const attachUserToFrame = usedUserReference && /合照|同框|一起|两人|我们|咱们/.test(description);
     const firstFrame = attachUserToFrame
@@ -206,7 +213,7 @@ async function prepareRequest(
         anchors ? `【角色特定锚点】${anchors}` : "",
         "【锁脸要求】画面中角色的脸必须与参考图保持同一个人，五官、脸型、发型、肤色一致，禁止换脸或美颜成另一个人。",
         attachUserToFrame ? "【双人参考】参考图里是分格参考板：左格是角色，右格是用户；两人必须保持各自的脸，不得混脸。" : "",
-        settings.motionReferenceRef || settings.motionReferenceUrl
+        motionReference
             ? "【动作参考】动作节奏与手势参考提供的视频，但人物长相必须以参考图为准。"
             : "",
         `【画面要求】单镜头、固定机位、人物半身或全身入镜、手部动作清晰，时长约 ${preset.duration} 秒，不要字幕、不要水印、不要多镜头切换。`,
@@ -240,6 +247,7 @@ function videoApiRequestBody(prepared: PreparedRequest) {
         motionReferenceField: preset.motionReferenceField || "video_url",
         duration: preset.duration,
         ratio: preset.ratio,
+        resolution: preset.resolution,
         endpointMode: preset.endpointMode,
     };
 }
@@ -312,11 +320,13 @@ export async function generateVideoFromConfiguredApi(params: {
     characterId?: string;
     appId?: string;
     durationSeconds?: number;
+    /** 聊天里刚发的视频：作为动作参考（media-store 引用）。 */
+    motionReferenceRef?: string;
     signal?: AbortSignal;
 }): Promise<VideoGenerationResult> {
     const description = params.description.trim();
     if (!description) throw new VideoGenerationFailure("FAILED", "缺少视频画面描述");
-    const prepared = await prepareRequest(description, params.characterId, params.appId || "chat");
+    const prepared = await prepareRequest(description, params.characterId, params.appId || "chat", params.motionReferenceRef);
     if (params.durationSeconds && Number.isFinite(params.durationSeconds)) {
         prepared.preset = {
             ...prepared.preset,

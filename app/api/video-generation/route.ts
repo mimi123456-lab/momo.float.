@@ -21,6 +21,7 @@ type VideoRequest = {
     motionReferenceField?: string;
     duration?: number;
     ratio?: string;
+    resolution?: string;
     endpointMode?: "auto" | "generations" | "sora";
     taskId?: string;
 };
@@ -174,6 +175,7 @@ function buildSubmitBody(input: VideoRequest, style: "generations" | "sora"): Re
     const body: Record<string, unknown> = {
         model: input.model,
         prompt: input.prompt,
+        resolution: input.resolution || "720p",
     };
     if (input.image) body[imageField] = input.image;
     const extraField = (input.extraReferenceField || "").trim();

@@ -933,6 +933,7 @@ export const DEFAULT_VIDEO_PRESET: VideoPreset = {
     model: "sora-2",
     duration: 8,
     ratio: "16:9",
+    resolution: "720p",
     endpointMode: "auto",
     extraPrompt: "",
     supportsMotionReference: false,
@@ -962,6 +963,9 @@ function normalizeVideoPreset(preset: Partial<VideoPreset> | null | undefined, i
         model: typeof preset?.model === "string" ? preset.model : DEFAULT_VIDEO_PRESET.model,
         duration: Number.isFinite(duration) ? Math.min(13, Math.max(5, duration)) : DEFAULT_VIDEO_PRESET.duration,
         ratio,
+        resolution: typeof preset?.resolution === "string" && preset.resolution.trim()
+            ? preset.resolution.trim()
+            : DEFAULT_VIDEO_PRESET.resolution,
         endpointMode: preset?.endpointMode === "generations" || preset?.endpointMode === "sora" ? preset.endpointMode : "auto",
         extraPrompt: typeof preset?.extraPrompt === "string" ? preset.extraPrompt : "",
         supportsMotionReference: preset?.supportsMotionReference === true,
