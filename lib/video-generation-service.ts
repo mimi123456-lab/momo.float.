@@ -1,13 +1,14 @@
 import { getChatImageFromIndexedDB } from "./chat-asset-storage";
 import {
-    combineReferenceImagesForEdit,
     normalizeReferenceImageForEdit,
     resolveGenerationUserIdentityId,
 } from "./image-generation-service";
+import { descriptionNeedsUserReference } from "./image-reference-selection";
 import { kvGet, kvSet } from "./kv-db";
 import { loadMediaBlob, storeMediaBlob } from "./media-cache-storage";
 import {
     loadImageGenerationSettings,
+    loadUserIdentities,
     loadVideoGenerationSettings,
     resolveActiveVideoPreset,
 } from "./settings-storage";
@@ -60,6 +61,8 @@ type PreparedRequest = {
     settings: VideoGenerationSettings;
     preset: VideoPreset;
     prompt: string;
+    /** 描述是「角色自拍自己正在做什么」，用于自动切竖屏近景。 */
+    isSelfie: boolean;
     characterReferenceDataUrl: string;
     userReferenceDataUrl: string;
     motionReference: string;
@@ -182,9 +185,16 @@ async function prepareRequest(
 
     const identityId = resolveGenerationUserIdentityId(characterId, appId);
     const userRef = identityId ? imageSettings.userReferences?.[identityId] : undefined;
+    // 视频和生图一样：只有描述里明确要用户本人出镜（合照/同框/两人）才附加用户参考图。
+    // 之前无条件带用户照片，是「莫名其妙多出一个人」的主要来源。
+    const userName = identityId
+        ? loadUserIdentities().find(identity => identity.id === identityId)?.name
+        : undefined;
+    const needsUserInFrame = descriptionNeedsUserReference(description, userName)
+        || /(合照|合影|同框|两人|双人)/.test(description);
     let userReferenceDataUrl = "";
     let usedUserReference = false;
-    if (settings.includeUserReference) {
+    if (settings.includeUserReference && needsUserInFrame) {
         if (!userRef?.assetId || userRef.enabled === false) {
             throw new VideoGenerationFailure(
                 "NO_USER_REFERENCE",
@@ -206,31 +216,42 @@ async function prepareRequest(
         ? (preset.supportsMotionReference ? await loadMotionReferenceRef(motionReferenceOverride) : "")
         : await resolveMotionReference(settings, preset);
 
-    const attachUserToFrame = usedUserReference
-        && (preset.imageField !== "image" || /合照|同框|一起|两人|我们|咱们/.test(description));
-    const firstFrame = attachUserToFrame
-        ? await combineReferenceImagesForEdit([
-            { dataUrl: characterReferenceDataUrl, label: "角色参考（左）" },
-            { dataUrl: userReferenceDataUrl, label: "用户参考（右）" },
-        ]) || characterReferenceDataUrl
-        : characterReferenceDataUrl;
+    // 首帧只放角色参考图。之前会把「角色 + 用户」拼成分格参考板当首帧，
+    // 图生视频会把分格板原样拍成多个人（还会带上参考板里的文字标签），所以视频不再拼板。
+    const firstFrame = characterReferenceDataUrl;
 
     const appearance = characterRef?.featurePrompt?.trim() || "";
     const anchors = (characterRef?.anchors || [])
         .filter(anchor => anchor.enabled !== false && anchor.description.trim())
         .map(anchor => `${anchor.name || "特征"}：${anchor.description.trim()}`)
         .join("；");
+    // 默认是「角色自拍自己正在做什么」；只有描述里明确出现别人/合照才用第三人称。
+    const selfieCue = /(自拍|前置|对着镜头|举着手机|手机镜头|对镜|selfie)/i.test(description);
+    const othersCue = /(朋友|同事|路人|家人|男友|女友|我们|一起|合影|合照|同框|其他人|陌生人)/.test(description);
+    const personCue = /(他|她|我|自己|角色|脸|手|上身|穿|拿|站|坐|躺|走|笑)/.test(description);
+    const isSelfie = selfieCue || (personCue && !othersCue && !usedUserReference);
+    const framing = isSelfie
+        ? `【画面要求】手机前置自拍视角：手机举在手里、近距离拍摄，脸和上半身占画面主要部分，手臂自然入镜，轻微手持晃动，像真人随手拍的自拍；单镜头，时长约 ${preset.duration} 秒；不要字幕、不要水印、不要台标、不要账号名或贴纸文字。`
+        : `【画面要求】单镜头、固定机位、人物半身或全身入镜、手部动作清晰，时长约 ${preset.duration} 秒；不要字幕、不要水印、不要台标、不要账号名或贴纸文字、不要多镜头切换。`;
+    const subjectRule = usedUserReference
+        ? "【人物数量】画面里只出现角色和用户本人两个人，不要额外增加无关路人或分身。"
+        : othersCue
+            ? "【人物数量】只出现描述里提到的人，不要额外增加无关路人、分身或克隆。"
+            : "【人物数量】画面中只出现角色一人；不要出现路人、朋友、分身或克隆。";
     const prompt = [
         description,
         appearance ? `【角色固定外观】${appearance}` : "",
         anchors ? `【角色特定锚点】${anchors}` : "",
         "【锁脸要求】画面中角色的脸必须与参考图保持同一个人，五官、脸型、发型、肤色一致，禁止换脸或美颜成另一个人。",
-        attachUserToFrame ? "【双人参考】参考图里是分格参考板：左格是角色，右格是用户；两人必须保持各自的脸，不得混脸。" : "",
+        usedUserReference ? "【双人参考】用户参考图只用于锁住用户的脸；两人必须保持各自的脸，不得混脸。" : "",
         motionReference
-            ? "【动作参考】动作节奏与手势参考提供的视频，但人物长相必须以参考图为准。"
+            ? "【动作参考】只参考动作节奏与手势；人物数量、长相、构图和场景以本次描述与角色参考图为准，不要照搬参考视频里的人数和画面。"
             : "",
-        `【画面要求】单镜头、固定机位、人物半身或全身入镜、手部动作清晰，时长约 ${preset.duration} 秒；不要字幕、不要水印、不要台标、不要账号名或贴纸文字、不要多镜头切换。`,
-        preset.keepBackgroundSharp
+        framing,
+        subjectRule,
+        "【画面纯净】不要出现角色设定图、多视图拼图、分格参考板或文字标签。",
+        "【拍摄质感】真人手机实拍质感：自然光、真实皮肤与发丝细节；如果额外提示词指定了画风，以画风提示词为准。",
+        preset.keepBackgroundSharp && !isSelfie
             ? "【背景要求】背景保持清晰、真实、有层次，不要虚化、不要大光圈散景、不要人像景深效果。"
             : "",
     ].filter(Boolean).join("\n\n");
@@ -239,7 +260,7 @@ async function prepareRequest(
     // 配了 COS（图片/视频都行）或 ImgBB（仅图片）时先换成公网链接；都没有则保持 base64。
     const mediaOptions = { cos: settings.cos, imageHosting: imageSettings.imageHosting };
     let characterReferenceOut = firstFrame;
-    let userReferenceOut = usedUserReference && !attachUserToFrame ? userReferenceDataUrl : "";
+    let userReferenceOut = usedUserReference ? userReferenceDataUrl : "";
     let motionReferenceOut = motionReference;
     const promote = async (value: string, kind: "image" | "video"): Promise<string> => {
         if (!value || isHttpUrl(value)) return value;
@@ -258,6 +279,7 @@ async function prepareRequest(
         settings,
         preset,
         prompt: preset.extraPrompt.trim() ? `${prompt}\n\n${preset.extraPrompt.trim()}` : prompt,
+        isSelfie,
         characterReferenceDataUrl: characterReferenceOut,
         userReferenceDataUrl: userReferenceOut,
         motionReference: motionReferenceOut,
@@ -430,6 +452,11 @@ export async function generateVideoFromConfiguredApi(params: {
     const description = params.description.trim();
     if (!description) throw new VideoGenerationFailure("FAILED", "缺少视频画面描述");
     const prepared = await prepareRequest(description, params.characterId, params.appId || "chat", params.motionReferenceRef);
+    // 自拍默认竖屏：用户只负责画风提示词，不应该再被默认 16:9 拍成横屏。
+    // 明确选了 1:1 等其他比例时尊重用户配置，只把默认的 16:9 改掉。
+    if (prepared.isSelfie && prepared.preset.ratio === "16:9") {
+        prepared.preset = { ...prepared.preset, ratio: "9:16" };
+    }
     if (params.durationSeconds && Number.isFinite(params.durationSeconds)) {
         prepared.preset = {
             ...prepared.preset,

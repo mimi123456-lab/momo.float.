@@ -196,7 +196,7 @@ export function VideoGenerationSettings() {
                 <div className="menu-item">
                     <span className="settings-tools-menu-copy">
                         <span className="menu-label appearance-menu-item-label">强制锁脸</span>
-                        <span className="menu-desc settings-tools-menu-desc">参考图取自「图像生成 API」里对应角色的角色参考图；聊天中由发消息的角色自动决定，这里不用选角色。没有参考图会直接报错且不发起请求。</span>
+                        <span className="menu-desc settings-tools-menu-desc">参考图取自「图像生成 API」里对应角色的角色参考图；聊天中由发消息的角色自动决定，这里不用选角色。没有参考图会直接报错且不发起请求。建议用单人正脸图：多视图/多人设定图会被图生视频原样拍成多个人，最好在角色参考图里设置「选脸区域」。</span>
                     </span>
                     <span className="menu-right settings-tools-menu-toggle">
                         <Toggle checked={true} onChange={() => {}} disabled className="settings-toggle-control" />
@@ -362,7 +362,7 @@ export function VideoGenerationSettings() {
                                 />
                             </div>
                             <div className="flex flex-col gap-1">
-                                <label className="menu-desc ml-1">比例</label>
+                                <label className="menu-desc ml-1">比例（自拍自动 9:16）</label>
                                 <Select value={activePreset.ratio} onChange={(event) => updatePreset({ ratio: event.target.value as VideoPreset["ratio"] })}>
                                     <option value="16:9">16:9</option>
                                     <option value="9:16">9:16</option>

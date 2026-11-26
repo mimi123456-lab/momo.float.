@@ -2084,7 +2084,7 @@ export async function buildChatPromptMessages(
     // 角色会不知道自己能主动发视频。只在线上聊天、且视频生成已配置时注入。
     if (!isOfflineMode && isVideoGenerationConfigured()) {
         const videoDirectiveDeclared = llmMessages.some(message => (
-            typeof message.content === "string" && message.content.includes("[视频:画面描述]")
+            typeof message.content === "string" && message.content.includes("【自拍视角】")
         ));
         if (!videoDirectiveDeclared) {
             llmMessages.push({
@@ -2093,7 +2093,11 @@ export async function buildChatPromptMessages(
                     "<chat_video_directive>",
                     "## 发视频 / 动图",
                     "【格式】[视频:画面描述] 或 [动图:画面描述]",
-                    "【规则】动图=实况，生成短秒数短片并静音循环播放；视频带播放条。描述按视频提示词写：主体、动作、镜头、环境、光线，只写可见画面，不写心理和剧情。",
+                    "【自拍视角】默认第一人称自拍：手机举在手里、近距离拍自己正在做什么；只有描述里明确出现别人（朋友/同事/一起/合影/有人帮拍）时才用第三人称。",
+                    "【拍什么】按角色此刻的状态和当前场景决定内容：他正在做什么、周围有谁；没有别人就写“只有角色一人”。不要凭空跳到无关场景。",
+                    "【动图还是视频】几秒钟、随手分享此刻正在做的，用 [动图]（静音循环，像实况）；想看一段完整动作或氛围，用 [视频]（带播放条）。",
+                    "【描述要求】写清角色在做什么、镜头（默认自拍近景）、身边有谁、环境、光线、动作；只写可见画面，不写心理和剧情。",
+                    "【禁止】无关路人、分身/克隆、角色设定图或多视图拼图、字幕水印。",
                     "【锁脸】画面中出现你自己时，会强制使用角色参考图锁脸。",
                     "【频率】同一轮最多发一条；不要连续两轮都发；没有合适场景不要使用。",
                     "</chat_video_directive>",
