@@ -212,7 +212,15 @@ export function resolveStatusRegionSection(
     if (config.mode === "off") return "";
     if (isCustomStatusRegionActive(config)) {
         // 契约即「## 状态栏」章节的整个正文（含【逻辑】【格式】与 [状态栏] 包裹要求），不再套固定信封
-        const body = "## 状态栏\n" + config.contract.trim();
+        const body = [
+            "## 状态栏",
+            config.contract.trim(),
+            "",
+            "【硬性要求】",
+            "- 状态栏只承载状态数据，不得写入聊天内容，控制在 300 字以内。",
+            "- [/状态栏] 之后必须另起正文，输出真正的聊天消息；正文不得省略、不得为空。",
+            "- 只输出状态栏而不输出正文视为错误。",
+        ].join("\n");
         if (variant !== "group") return body;
         return [
             body,

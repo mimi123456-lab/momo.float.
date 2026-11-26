@@ -46,7 +46,7 @@ import { resolveChatAccountUserIdentity } from "./chat-scope-storage";
 import { buildChineseThinkingPrompt, withChineseThinkingPrompt } from "./chinese-thinking-prompt";
 import { assemblePromptPayload, applyOutputRegex, type LLMMessage, type LLMContentPart } from "./llm-prompt-assembler";
 import { MacroEngine, postProcessTrim } from "./macro-engine";
-import { getStatusRegionConfig, getOfflineStatusRegionConfig, resolveStatusRegionSection, resolveStatusRegionExampleLine, resolveStatusRegionComposition, resolveStatusRegionFullExample, presetSupportsStatusRegion } from "./chat-status-region";
+import { getStatusRegionConfig, getOfflineStatusRegionConfig, resolveStatusRegionSection, resolveStatusRegionExampleLine, resolveStatusRegionComposition, resolveStatusRegionFullExample, presetSupportsStatusRegion, isCustomStatusRegionActive } from "./chat-status-region";
 import {
     buildProviderDebugMessages,
     buildProviderRequest,
@@ -2066,6 +2066,18 @@ export async function buildChatPromptMessages(
         const offlineStyle = loadOfflineStylePrompt().trim();
         if (offlineStyle) {
             llmMessages.push({ role: "system", content: `## 线下文风要求\n${offlineStyle}` });
+        }
+        // 状态栏只做展示：模型容易把整段回复塞进 [状态栏]，导致正文缺失。
+        if (isCustomStatusRegionActive(statusRegionCfg)) {
+            llmMessages.push({
+                role: "system",
+                content: [
+                    "## 输出顺序（线下）",
+                    "1. 先输出 [状态栏]...[/状态栏]，只放状态数据。",
+                    "2. 空一行，再输出聊天正文。",
+                    "禁止只输出状态栏；[/状态栏] 之后必须有正文。",
+                ].join("\n"),
+            });
         }
     }
     // 视频/动图能力说明兜底：预设是用户本地副本，老预设或自定义预设可能没有这条指令，
