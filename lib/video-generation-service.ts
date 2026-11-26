@@ -63,6 +63,8 @@ type PreparedRequest = {
     prompt: string;
     /** 描述是「角色自拍自己正在做什么」，用于自动切竖屏近景。 */
     isSelfie: boolean;
+    /** 视频（带播放条）才要原生音频；动图是静音循环，不请求声音。 */
+    nativeAudio: boolean;
     characterReferenceDataUrl: string;
     userReferenceDataUrl: string;
     motionReference: string;
@@ -157,6 +159,7 @@ async function prepareRequest(
     characterId: string | undefined,
     appId: string,
     motionReferenceOverride?: string,
+    videoKind?: "clip" | "loop",
 ): Promise<PreparedRequest> {
     const settings = loadVideoGenerationSettings();
     if (!settings.enabled) throw new VideoGenerationFailure("DISABLED", "视频生成未启用");
@@ -243,9 +246,11 @@ async function prepareRequest(
     const prompt = [
         stylePrompt ? `【画风 / 额外要求（最高优先级，覆盖下面的默认拍摄质感与构图）】${stylePrompt}` : "",
         description,
-        // 原生音频：支持声音生成的模型（Veo / Sora / Kling 音频版等）会按这段生成现场环境音；
-        // 不支持的模型会忽略，不影响画面。
-        "【环境声】只生成与画面场景一致的真实现场环境音（如街道车流、远处鸣笛、脚步、风声、雨声、室内回声），按当前场景自然出现；不要配乐、不要旁白、不要字幕，画面里没有人开口时不要加说话声。",
+        // 原生音频：支持声音生成的模型（Seedance 2.x / Veo / Sora 等）会按这段生成现场环境音；
+        // 不支持的模型会忽略，不影响画面。动图是静音循环，不写声音要求。
+        videoKind !== "loop"
+            ? "【环境声】只生成与画面场景一致的真实现场环境音（如街道车流、远处鸣笛、脚步、风声、雨声、室内回声），按当前场景自然出现；不要配乐、不要旁白、不要字幕，画面里没有人开口时不要加说话声。"
+            : "",
         appearance ? `【角色固定外观】${appearance}` : "",
         anchors ? `【角色特定锚点】${anchors}` : "",
         "【锁脸要求】画面中角色的脸必须与参考图保持同一个人，五官、脸型、发型、肤色一致，禁止换脸或美颜成另一个人。",
@@ -287,6 +292,7 @@ async function prepareRequest(
         preset,
         prompt,
         isSelfie,
+        nativeAudio: videoKind !== "loop",
         characterReferenceDataUrl: characterReferenceOut,
         userReferenceDataUrl: userReferenceOut,
         motionReference: motionReferenceOut,
@@ -337,8 +343,19 @@ export function inferVideoPresetDefaults(model: string): Partial<VideoPreset> {
     return { endpointMode: "auto", fps: 24, imageField: "image" };
 }
 
+/** Seedance 2.x（含 Fast / Mini）支持原生音频；1.x 及未知模型不加参数，避免上游报错。 */
+function isSeedance2Model(model: string): boolean {
+    return /seedance[-_. ]?2/i.test(model);
+}
+
 function videoApiRequestBody(prepared: PreparedRequest) {
     const { preset } = prepared;
+    const extraBody = parseExtraParams(preset.extraParams) ?? {};
+    // 「生成有声视频」参数按火山方舟文档下发字符串 "true"。用户在高级参数里显式配置
+    // generate_audio 时以用户为准（填 null 可关掉）。
+    if (prepared.nativeAudio && isSeedance2Model(preset.model) && !("generate_audio" in extraBody)) {
+        extraBody.generate_audio = "true";
+    }
     return {
         baseUrl: preset.baseUrl,
         apiKey: preset.apiKey,
@@ -356,7 +373,7 @@ function videoApiRequestBody(prepared: PreparedRequest) {
         resolution: preset.resolution,
         fps: preset.fps,
         imageField: preset.imageField || "image",
-        extraBody: parseExtraParams(preset.extraParams),
+        extraBody: Object.keys(extraBody).length > 0 ? extraBody : undefined,
         endpointMode: preset.endpointMode,
         direct: prepared.settings.directMode !== false,
     };
@@ -454,11 +471,19 @@ export async function generateVideoFromConfiguredApi(params: {
     durationSeconds?: number;
     /** 聊天里刚发的视频：作为动作参考（media-store 引用）。 */
     motionReferenceRef?: string;
+    /** 动图=静音循环，不请求原生音频；视频默认要环境声。 */
+    videoKind?: "clip" | "loop";
     signal?: AbortSignal;
 }): Promise<VideoGenerationResult> {
     const description = params.description.trim();
     if (!description) throw new VideoGenerationFailure("FAILED", "缺少视频画面描述");
-    const prepared = await prepareRequest(description, params.characterId, params.appId || "chat", params.motionReferenceRef);
+    const prepared = await prepareRequest(
+        description,
+        params.characterId,
+        params.appId || "chat",
+        params.motionReferenceRef,
+        params.videoKind,
+    );
     // 自拍默认竖屏：用户只负责画风提示词，不应该再被默认 16:9 拍成横屏。
     // 明确选了 1:1 等其他比例时尊重用户配置，只把默认的 16:9 改掉。
     if (prepared.isSelfie && prepared.preset.ratio === "16:9") {

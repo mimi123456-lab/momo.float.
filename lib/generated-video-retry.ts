@@ -66,16 +66,17 @@ export async function generateAndApplyChatGeneratedVideo(
     }
 
     try {
+        const previousData = message.mediaData ?? {};
         const generated = await generateVideoFromConfiguredApi({
             description,
             characterId,
             appId: "chat",
             durationSeconds: options?.durationSeconds,
             motionReferenceRef: options?.motionReferenceRef,
+            videoKind: previousData.videoKind === "loop" ? "loop" : "clip",
             signal: options?.signal,
         });
         const fileName = generatedVideoFilename(description);
-        const previousData = message.mediaData ?? {};
         const updated = updateChatMessage(message.id, {
             content: fileName,
             mediaType: "media_file",
