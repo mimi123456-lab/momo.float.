@@ -59,9 +59,11 @@ async function extractFrames(
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(width * scale));
     canvas.height = Math.max(1, Math.round(height * scale));
-    // requestedCount 为 0 表示按视频时长自动决定：约每 1.5 秒一帧，4~12 帧。
-    const autoCount = Math.min(12, Math.max(4, Math.round(duration / 1.5)));
-    const count = Math.min(24, Math.max(4, Math.floor(requestedCount || autoCount)));
+    // requestedCount 为 0 表示按视频时长自动决定：约每 3 秒一帧，4~6 帧。
+    // 帧数不能多：历史图片按 detail:"low" 发送，会被压到长边约 512px，
+    // 12 帧拼图每格只剩一百多像素，模型反而看不清动作。
+    const autoCount = Math.min(6, Math.max(4, Math.round(duration / 3)));
+    const count = Math.min(12, Math.max(4, Math.floor(requestedCount || autoCount)));
     const context = canvas.getContext("2d", { alpha: false });
     if (!context) throw new Error("无法初始化视频关键帧画布。");
     const frames: SampledFrame[] = [];
@@ -79,7 +81,7 @@ async function extractFrames(
     // 避免“先探测再重抓”做两遍 seek（移动端 seek 是主要耗时来源）。
     if (mode === "adaptive") {
       const target = count;
-      const candidateCount = Math.min(18, Math.max(6, Math.ceil(duration / 1.2)));
+      const candidateCount = Math.min(10, Math.max(6, Math.ceil(duration / 1.8)));
       const probe = document.createElement("canvas");
       probe.width = 40;
       probe.height = 40;
@@ -387,13 +389,13 @@ export async function buildVideoContactSheet(
     img.onerror = () => reject(new Error("视频关键帧解码失败"));
     img.src = frame.dataUrl;
   })));
-  const cellWidth = 320;
+  const cellWidth = 300;
   const aspect = images[0].height && images[0].width ? images[0].height / images[0].width : 9 / 16;
   const cellHeight = Math.max(1, Math.round(cellWidth * aspect));
   const gap = 6;
   const labelHeight = 22;
-  // 多帧时排成网格（最多 4 列），单行拼图在 12 帧时会被模型缩放到看不清。
-  const columns = Math.min(4, images.length);
+  // 多帧时排成网格（最多 3 列）：列数越少格子越大，压缩后仍能看清肢体动作。
+  const columns = Math.min(3, images.length);
   const rows = Math.ceil(images.length / columns);
   const canvas = document.createElement("canvas");
   canvas.width = columns * cellWidth + (columns - 1) * gap;
