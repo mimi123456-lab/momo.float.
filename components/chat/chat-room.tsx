@@ -57,7 +57,7 @@ import { useKeyboardDismissAutoSend } from "@/components/chat/use-keyboard-dismi
 import { cancelBailoutKey } from "@/lib/push-bailout-client";
 import { PENDING_REPLY_PREFIX } from "@/lib/friend-request-engine";
 import type { UserIdentity } from "@/components/settings/user-identity";
-import { AlertCircle, Activity, Blocks, Bookmark, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
+import { AlertCircle, Blocks, Bookmark, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
 import { setDebugChatState } from "@/lib/debug-store";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import { setChatActive } from "@/lib/music-action-queue";
@@ -209,6 +209,41 @@ const OfflineAssistantTextBlock = memo(function OfflineAssistantTextBlock({
                 </div>
             ))}
         </div>
+    );
+});
+
+const OfflineStatusFold = memo(function OfflineStatusFold({
+    raw,
+    renderHtml,
+    customActive,
+    defaultExpanded,
+}: {
+    raw: string;
+    renderHtml: string;
+    customActive: boolean;
+    defaultExpanded: boolean;
+}) {
+    // details 闭合时 iframe 也会加载并跑脚本，改为首次展开后再挂载，
+    // 避免一屏十几条线下记录各挂一张状态卡拖慢手机。
+    const [opened, setOpened] = useState(false);
+    return (
+        <details
+            className="chat-offline-summary-fold chat-offline-status-fold"
+            onToggle={(event) => {
+                if ((event.currentTarget as HTMLDetailsElement).open) setOpened(true);
+            }}
+        >
+            <summary>状态❤️</summary>
+            {opened ? (
+                <div className="chat-offline-summary-content">
+                    {customActive && renderHtml.trim() ? (
+                        <CustomStatusFrame html={renderHtml} raw={raw} />
+                    ) : (
+                        <BilingualTextBlock text={raw} mode="markdown" defaultExpanded={defaultExpanded} htmlFrameVariant="offline" />
+                    )}
+                </div>
+            ) : null}
+        </details>
     );
 });
 
@@ -1175,8 +1210,6 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
     const [customPlusActions, setCustomPlusActions] = useState<RegisteredCustomAppChatPlusAction[]>(() => loadCustomAppChatPlusActions());
     const [activeCustomChatPlus, setActiveCustomChatPlus] = useState<ActiveCustomChatPlus | null>(null);
     const [showSettings, setShowSettings] = useState(false);
-    // 线下状态栏改成右上角按钮弹出，不再常驻消息流顶部。
-    const [showOfflineStatus, setShowOfflineStatus] = useState(false);
     const [showVoiceCall, setShowVoiceCall] = useState(false);
     const [showVideoCall, setShowVideoCall] = useState(false);
     const [callMinimized, setCallMinimized] = useState(false);
@@ -4527,16 +4560,43 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
             ? parseOfflineResponse(rawDisplay, turn.summaryTag || "summary")
             : null;
         const hasParsedDisplay = Boolean(parsed?.content.trim() || parsed?.summary.trim());
+        const assistantContent = hasParsedDisplay
+            ? (parsed!.content.trim() || renderDisplayText(turn.assistantContent, 2, true))
+            : renderDisplayText(turn.assistantContent, 2, true);
+        // 本轮 [状态栏]：可能写在线下回复的 <content> 之外（比如紧跟 <thinking> 后面），
+        // 所以优先从原始输出里找，找不到再退回格式化后的显示文本。
+        const statusSources = [turn.rawText, rawDisplay].filter((item): item is string => !!item && !!item.trim());
+        let status = "";
+        for (const source of statusSources) {
+            if (!source.includes("状态栏")) continue;
+            try {
+                const statusParsed = parseAIResponse(source, []);
+                if (statusParsed.statusPanel && statusParsed.statusPanel.trim()) {
+                    status = statusParsed.statusPanel.trim();
+                    break;
+                }
+            } catch { /* 解析失败就试下一个来源 */ }
+        }
+        // 没写 [状态栏] 且没启用自定义状态栏时，兜底用原生状态值 + 内心独白拼一条。
+        if (!status && !offlineCustomStatusActive && statusSources[0]) {
+            try {
+                const statusParsed = parseAIResponse(statusSources[0], []);
+                const values = statusParsed.stateValues.map(item => `[${item.name}:${item.value}]`).join("");
+                const mono = statusParsed.innerMonologue && statusParsed.innerMonologue.trim()
+                    ? `[内心]${statusParsed.innerMonologue.trim()}[/内心]`
+                    : "";
+                status = [values, mono].filter(Boolean).join("\n").trim();
+            } catch { /* ignore */ }
+        }
         return {
             userContent: renderDisplayText(turn.userContent, 1, true),
-            assistantContent: hasParsedDisplay
-                ? (parsed!.content.trim() || renderDisplayText(turn.assistantContent, 2, true))
-                : renderDisplayText(turn.assistantContent, 2, true),
+            assistantContent,
             summary: hasParsedDisplay
                 ? (parsed!.summary.trim() || renderDisplayText(turn.summary, 2, true))
                 : renderDisplayText(turn.summary, 2, true),
+            status,
         };
-    }, [formatOfflineTurnXml, renderDisplayText]);
+    }, [formatOfflineTurnXml, renderDisplayText, offlineCustomStatusActive]);
 
     const visibleOfflineTurns = useMemo(() => {
         return offlineTurns.slice(-offlineVisibleCount);
@@ -4551,38 +4611,6 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
         }
         return map;
     }, [getOfflineDisplayText, visibleOfflineTurns]);
-
-    // 线下状态栏：取最近一条线下回复里的 [状态栏]，用与线上同一套自定义配置渲染。
-    const offlineStatusPanel = useMemo(() => {
-        for (let index = visibleOfflineTurns.length - 1; index >= 0; index -= 1) {
-            const turn = visibleOfflineTurns[index];
-            const display = offlineDisplayByTurnId.get(turn.id) ?? getOfflineDisplayText(turn);
-            const content = display.assistantContent;
-            // 状态栏可能被写在线下回复的 <content> 之外（比如紧跟 <thinking> 后面），
-            // 这里优先从原始输出里找，找不到再看解析后的正文。
-            const sources = [turn.rawText, content].filter((item): item is string => !!item && !!item.trim());
-            if (!sources.length) continue;
-            for (const source of sources) {
-                try {
-                    const parsed = parseAIResponse(source, []);
-                    if (parsed.statusPanel && parsed.statusPanel.trim()) return parsed.statusPanel;
-                } catch { /* 解析失败就试下一个来源 */ }
-            }
-            // 自定义状态栏没启用时，兜底用原生状态值 + 内心独白拼一条，避免线下完全空着。
-            if (!offlineCustomStatusActive) {
-                try {
-                    const parsed = parseAIResponse(sources[0], []);
-                    const values = parsed.stateValues.map(item => `[${item.name}:${item.value}]`).join("");
-                    const mono = parsed.innerMonologue && parsed.innerMonologue.trim()
-                        ? `[内心]${parsed.innerMonologue.trim()}[/内心]`
-                        : "";
-                    return [values, mono].filter(Boolean).join("\n");
-                } catch { /* ignore */ }
-            }
-            return "";
-        }
-        return "";
-    }, [offlineCustomStatusActive, getOfflineDisplayText, offlineDisplayByTurnId, visibleOfflineTurns]);
 
     const loadMoreOfflineTurns = useCallback(() => {
         if (!hasMoreOfflineTurns) return;
@@ -6076,36 +6104,12 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
                         )}
                     </span>
                     <span className="page-header-right">
-                        {offlineMode && offlineStatusPanel && (
-                            <button className="page-back-btn" type="button" onClick={() => setShowOfflineStatus(value => !value)} aria-label="状态">
-                                <Activity size={22} strokeWidth={1.5} />
-                            </button>
-                        )}
                         <button className="page-back-btn" type="button" onClick={() => setShowSettings(true)} aria-label="更多">
                             <MoreHorizontal size={22} strokeWidth={1.5} />
                         </button>
                     </span>
                 </div>
             </header>
-            {offlineMode && offlineStatusPanel && showOfflineStatus && (
-                <div className="chat-status-popover-mask" onClick={() => setShowOfflineStatus(false)}>
-                    <div className="chat-status-popover" onClick={(event) => event.stopPropagation()}>
-                        <div className="chat-status-popover-head">
-                            <span>当前状态</span>
-                            <button type="button" className="chat-status-popover-close" onClick={() => setShowOfflineStatus(false)} aria-label="关闭">
-                                <X size={16} />
-                            </button>
-                        </div>
-                        <div className="chat-status-popover-body chat-status-bare">
-                            {offlineCustomStatusActive && offlineStatusRegionCfg.renderHtml.trim() ? (
-                                <CustomStatusFrame html={offlineStatusRegionCfg.renderHtml} raw={offlineStatusPanel} />
-                            ) : (
-                                <BilingualTextBlock text={offlineStatusPanel} mode="markdown" defaultExpanded={session.collapseBilingualTranslation !== false ? false : true} htmlFrameVariant="offline" />
-                            )}
-                        </div>
-                    </div>
-                </div>
-            )}
             <ChatPluginSlot
                 name="chat.header"
                 slotProps={{ sessionId: session.id, isGroup: !!session.isGroup }}
@@ -6262,6 +6266,14 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
                                                 />
                                             </div>
                                         </details>
+                                    )}
+                                    {offlineDisplay.status.trim() && (
+                                        <OfflineStatusFold
+                                            raw={offlineDisplay.status}
+                                            renderHtml={offlineStatusRegionCfg.renderHtml}
+                                            customActive={offlineCustomStatusActive}
+                                            defaultExpanded={session.collapseBilingualTranslation !== false ? false : true}
+                                        />
                                     )}
                                 </div>
                             </div>
