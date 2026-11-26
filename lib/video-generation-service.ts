@@ -238,7 +238,10 @@ async function prepareRequest(
         : othersCue
             ? "【人物数量】只出现描述里提到的人，不要额外增加无关路人、分身或克隆。"
             : "【人物数量】画面中只出现角色一人；不要出现路人、朋友、分身或克隆。";
+    // 额外提示词（用户填的画风）提到最前面并标成最高优先级，避免被固定模板里的“真人实拍质感”压掉。
+    const stylePrompt = preset.extraPrompt.trim();
     const prompt = [
+        stylePrompt ? `【画风 / 额外要求（最高优先级，覆盖下面的默认拍摄质感与构图）】${stylePrompt}` : "",
         description,
         appearance ? `【角色固定外观】${appearance}` : "",
         anchors ? `【角色特定锚点】${anchors}` : "",
@@ -247,10 +250,11 @@ async function prepareRequest(
         motionReference
             ? "【动作参考】只参考动作节奏与手势；人物数量、长相、构图和场景以本次描述与角色参考图为准，不要照搬参考视频里的人数和画面。"
             : "",
+        "【动作方向】严格按描述里的动作方向与顺序拍摄：描述是“走向/进入/推门”就拍进入的过程，不要反向拍成“离开/走出”；时间、地点和正在做的事必须接得上当前剧情，不要跳步。",
         framing,
         subjectRule,
         "【画面纯净】不要出现角色设定图、多视图拼图、分格参考板或文字标签。",
-        "【拍摄质感】真人手机实拍质感：自然光、真实皮肤与发丝细节；如果额外提示词指定了画风，以画风提示词为准。",
+        stylePrompt ? "" : "【拍摄质感】真人手机实拍质感：自然光、真实皮肤与发丝细节。",
         preset.keepBackgroundSharp && !isSelfie
             ? "【背景要求】背景保持清晰、真实、有层次，不要虚化、不要大光圈散景、不要人像景深效果。"
             : "",
@@ -278,7 +282,7 @@ async function prepareRequest(
     return {
         settings,
         preset,
-        prompt: preset.extraPrompt.trim() ? `${prompt}\n\n${preset.extraPrompt.trim()}` : prompt,
+        prompt,
         isSelfie,
         characterReferenceDataUrl: characterReferenceOut,
         userReferenceDataUrl: userReferenceOut,
