@@ -44,6 +44,38 @@ function generatedVideoFilename(description: string): string {
     return `${cleaned}.mp4`;
 }
 
+/** 生成成功后把 [动图:描述|台词] 的台词合成配音并挂到消息上；失败不影响视频。 */
+async function attachVideoVoiceLine(
+    updated: ChatMessage,
+    characterId?: string,
+): Promise<ChatMessage> {
+    const voiceLine = (updated.mediaData?.videoVoiceLine || "").trim();
+    if (!voiceLine || !characterId || updated.mediaData?.videoVoiceMediaRef) return updated;
+    try {
+        const [{ resolveVoiceConfig, synthesizeSpeech }, { storeMediaBlob }] = await Promise.all([
+            import("./tts-service"),
+            import("./media-cache-storage"),
+        ]);
+        const voiceConfig = resolveVoiceConfig(characterId, "chat");
+        if (!voiceConfig) return updated;
+        const blob = await synthesizeSpeech(voiceLine, voiceConfig);
+        if (!blob) return updated;
+        const ref = await storeMediaBlob(blob, blob.type || "audio/mpeg", "audio");
+        const withVoice = updateChatMessage(updated.id, {
+            mediaData: {
+                ...updated.mediaData,
+                videoVoiceMediaRef: ref,
+                videoVoiceText: voiceLine,
+            },
+        });
+        if (!withVoice) return updated;
+        dispatchChatMessagesUpdated(withVoice.sessionId, withVoice);
+        return withVoice;
+    } catch {
+        return updated;
+    }
+}
+
 export async function generateAndApplyChatGeneratedVideo(
     message: ChatMessage,
     characterId?: string,
@@ -97,7 +129,7 @@ export async function generateAndApplyChatGeneratedVideo(
         });
         if (!updated) throw new Error("原消息不存在，无法替换视频");
         dispatchChatMessagesUpdated(updated.sessionId, updated);
-        return updated;
+        return await attachVideoVoiceLine(updated, characterId);
     } catch (error) {
         const failed = updateChatMessage(message.id, {
             mediaData: {

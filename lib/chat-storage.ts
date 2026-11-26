@@ -282,6 +282,12 @@ export type ChatMessage = {
         videoGenerationMediaRef?: string;
         videoGenerationPrompt?: string;
         videoDurationSeconds?: number;
+        /** [动图:描述|台词] 里的台词，用于生成视频后合成配音。 */
+        videoVoiceLine?: string;
+        /** 台词配音音频的 media-store 引用（点按时与视频一起播放）。 */
+        videoVoiceMediaRef?: string;
+        /** 实际用于配音的台词文本。 */
+        videoVoiceText?: string;
         /** 生成附注（如动作参考因体积过大被跳过）。 */
         videoGenerationNote?: string;
         /** 用户发来的视频：关键帧拼图（data URL），供视觉模型“看”视频内容。 */

@@ -203,17 +203,25 @@ const RICH_PATTERNS: {
     },
     {
         // 角色主动发视频/动图。动图=实况：短秒数、静音循环播放；视频带进度条。
+        // 可选台词：[动图:画面描述|台词]，竖线后的台词用于 TTS 配音，不进入画面提示词。
         regex: new RegExp(`\\[(动图|视频)${C}([^\\]]+)\\]`),
-        build: (m) => ({
-            content: "",
-            mediaType: "media_file" as const,
-            mediaData: {
-                label: m[2].trim(),
-                fileType: "video" as const,
-                videoKind: m[1] === "动图" ? "loop" as const : "clip" as const,
-                videoGenerationStatus: "pending" as const,
-            },
-        }),
+        build: (m) => {
+            const raw = m[2].trim();
+            const voiceSep = raw.search(/[|｜]/);
+            const label = voiceSep >= 0 ? raw.slice(0, voiceSep).trim() : raw;
+            const voiceLine = voiceSep >= 0 ? raw.slice(voiceSep + 1).trim() : "";
+            return {
+                content: "",
+                mediaType: "media_file" as const,
+                mediaData: {
+                    label,
+                    fileType: "video" as const,
+                    videoKind: m[1] === "动图" ? "loop" as const : "clip" as const,
+                    videoGenerationStatus: "pending" as const,
+                    ...(voiceLine ? { videoVoiceLine: voiceLine } : {}),
+                },
+            };
+        },
     },
     {
         regex: new RegExp(`\\[位置${C}([^\\]]+)\\]`),

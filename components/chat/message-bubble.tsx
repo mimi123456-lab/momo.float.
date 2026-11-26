@@ -2065,6 +2065,66 @@ function MediaFileBubble({
         return () => { if (revokeUrl) URL.revokeObjectURL(revokeUrl); };
     }, [rawUrl]);
 
+    // 视频配音：[动图:描述|台词] 生成后会另存一条 TTS 音频，随视频一起播放。
+    const videoRef = useRef<HTMLVideoElement>(null);
+    const voiceAudioRef = useRef<HTMLAudioElement>(null);
+    const [voiceUrl, setVoiceUrl] = useState("");
+    const [voiceOn, setVoiceOn] = useState(false);
+
+    useEffect(() => {
+        const ref = msg.mediaData?.videoVoiceMediaRef || "";
+        if (!ref) { setVoiceUrl(""); return; }
+        let cancelled = false;
+        let revokeUrl = "";
+        loadMediaObjectUrl(ref).then(objUrl => {
+            if (cancelled) { if (objUrl) URL.revokeObjectURL(objUrl); return; }
+            if (objUrl) { setVoiceUrl(objUrl); revokeUrl = objUrl; }
+        });
+        return () => {
+            cancelled = true;
+            if (revokeUrl) URL.revokeObjectURL(revokeUrl);
+        };
+    }, [msg.mediaData?.videoVoiceMediaRef]);
+
+    useEffect(() => () => {
+        const audio = voiceAudioRef.current;
+        if (audio) { try { audio.pause(); } catch { /* ignore */ } }
+    }, []);
+
+    const startVideoVoice = useCallback((restart: boolean) => {
+        const audio = voiceAudioRef.current;
+        if (!audio) return;
+        if (restart) {
+            try { audio.currentTime = 0; } catch { /* ignore */ }
+        }
+        void audio.play().catch(() => {});
+    }, []);
+
+    const stopVideoVoice = useCallback((reset: boolean) => {
+        const audio = voiceAudioRef.current;
+        if (!audio) return;
+        try {
+            audio.pause();
+            if (reset) audio.currentTime = 0;
+        } catch { /* ignore */ }
+    }, []);
+
+    // 动图默认静音循环；点按小喇叭才放开视频原声（背景音）并播一次台词。
+    const toggleLoopVoice = useCallback((e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!voiceUrl) return;
+        const video = videoRef.current;
+        if (voiceOn) {
+            setVoiceOn(false);
+            stopVideoVoice(true);
+            if (video) video.muted = true;
+        } else {
+            setVoiceOn(true);
+            if (video) video.muted = false;
+            startVideoVoice(true);
+        }
+    }, [voiceOn, voiceUrl, startVideoVoice, stopVideoVoice]);
+
     const togglePlay = useCallback((e: React.MouseEvent) => {
         e.stopPropagation();
         const audio = audioRef.current;
@@ -2313,14 +2373,58 @@ function MediaFileBubble({
 
     if (fileType === "video" && url) {
         const isLoop = msg.mediaData?.videoKind === "loop";
+        const muteLoopVideo = () => {
+            setVoiceOn(false);
+            if (videoRef.current) videoRef.current.muted = true;
+        };
         return (
             <div className="chat-media-file-wrap">
                 <div className="chat-media-file-card chat-media-file-video" style={{ position: "relative" }}>
                     {title && !isLoop && <div className="chat-media-file-title">{title}</div>}
                     {isLoop ? (
-                        <video src={url} autoPlay muted loop playsInline preload="metadata" onClick={(e) => e.stopPropagation()} />
+                        <video ref={videoRef} src={url} autoPlay muted loop playsInline preload="metadata" onClick={(e) => e.stopPropagation()} />
                     ) : (
-                        <video src={url} controls preload="metadata" onClick={(e) => e.stopPropagation()} />
+                        <video
+                            ref={videoRef}
+                            src={url}
+                            controls
+                            preload="metadata"
+                            onClick={(e) => e.stopPropagation()}
+                            onPlay={() => { if (voiceUrl) startVideoVoice(false); }}
+                            onPause={() => stopVideoVoice(false)}
+                            onEnded={() => stopVideoVoice(true)}
+                        />
+                    )}
+                    {voiceUrl && (
+                        <audio
+                            ref={voiceAudioRef}
+                            src={voiceUrl}
+                            preload="auto"
+                            style={{ display: "none" }}
+                            onEnded={() => { if (isLoop) muteLoopVideo(); }}
+                        />
+                    )}
+                    {isLoop && voiceUrl && (
+                        <button
+                            type="button"
+                            aria-label={voiceOn ? "关闭声音" : "播放声音"}
+                            onClick={toggleLoopVoice}
+                            style={{
+                                position: "absolute", left: 8, bottom: 8, width: 30, height: 30, borderRadius: 999,
+                                display: "flex", alignItems: "center", justifyContent: "center",
+                                border: "none", cursor: "pointer", color: "#fff", background: "rgba(0,0,0,0.45)",
+                            }}
+                        >
+                            {voiceOn ? (
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M11 5 6 9H3v6h3l5 4z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.5 6a9 9 0 0 1 0 12" />
+                                </svg>
+                            ) : (
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M11 5 6 9H3v6h3l5 4z" /><path d="m16 9 5 6" /><path d="m21 9-5 6" />
+                                </svg>
+                            )}
+                        </button>
                     )}
                     {isLoop && (
                         <span style={{
