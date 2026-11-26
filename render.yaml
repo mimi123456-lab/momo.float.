@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: momo-qqmusic
+    runtime: docker
+    plan: free
+    region: singapore
+    rootDir: server/qqmusic
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/music/health
+    envVars:
+      - key: ACCESS_KEY
+        generateValue: true
+      - key: DATA_DIR
+        value: /data

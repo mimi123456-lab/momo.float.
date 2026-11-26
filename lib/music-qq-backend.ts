@@ -148,7 +148,7 @@ export async function backendPlaylistSongs(
   return { songs: (data?.songs ?? []).filter(song => song.mid), hasMore: Boolean(data?.hasMore) };
 }
 
-/** 取真实播放地址：优先后端给的 direct 直链，否则拼后端路径。 */
+/** 取真实播放地址：优先走后端转发（后端会带 Referer，最稳），没有再退回 QQ 直链。 */
 export async function backendSongUrl(
   config: QqBackendConfig,
   song: BackendSong,
@@ -157,14 +157,16 @@ export async function backendSongUrl(
     method: "POST",
     body: { mid: song.mid, mediaMid: song.mediaMid, type: song.type },
   });
+  const relative = data?.url || "";
+  if (relative) {
+    return {
+      url: relative.startsWith("http") ? relative : `${config.baseUrl}${relative.startsWith("/") ? "" : "/"}${relative}`,
+      direct: false,
+    };
+  }
   const direct = data?.direct || "";
   if (direct) return { url: direct.replace(/^http:\/\//, "https://"), direct: true };
-  const relative = data?.url || "";
-  if (!relative) throw new QqBackendError("后端没有返回播放地址", 502);
-  return {
-    url: relative.startsWith("http") ? relative : `${config.baseUrl}${relative.startsWith("/") ? "" : "/"}${relative}`,
-    direct: false,
-  };
+  throw new QqBackendError("后端没有返回播放地址", 502);
 }
 
 export async function backendLyric(

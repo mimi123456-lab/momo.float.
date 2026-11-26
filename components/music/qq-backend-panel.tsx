@@ -210,9 +210,8 @@ export function QqBackendPanel({ onToast }: Props) {
     if (!config || playingId) return;
     setPlayingId(song.mid);
     try {
-      const { url, direct } = await backendSongUrl(config, song);
+      const { url } = await backendSongUrl(config, song);
       player.playUrl(url, backendSongToTrack(song));
-      if (direct) onToast("正在播放（后端直链）");
     } catch (error) {
       onToast(errText(error));
     } finally {
