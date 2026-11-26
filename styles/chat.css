@@ -2651,6 +2651,52 @@
   margin-top: 8px;
 }
 
+/* ── 线下状态栏弹层（右上角按钮触发） ── */
+.chat-status-popover-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0, 0, 0, 0.28);
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  padding: calc(env(safe-area-inset-top, 0px) + 60px) 12px 12px;
+}
+
+.chat-status-popover {
+  width: min(360px, calc(100vw - 24px));
+  max-height: 68vh;
+  overflow: auto;
+  padding: 10px 12px 12px;
+  border-radius: 16px;
+  background: var(--c-panel);
+  border: 1px solid var(--c-panel-border);
+  color: var(--c-text-title);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.24);
+}
+
+.chat-status-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: calc(12px * var(--app-text-scale, 1));
+  opacity: 0.72;
+  margin-bottom: 6px;
+}
+
+.chat-status-popover-close {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 4px;
+  display: flex;
+}
+
+.chat-status-popover .chat-status-bare {
+  margin: 0;
+  max-width: 100%;
+}
+
 /* ── Inner monologue card (sticky-note style) ── */
 .chat-thought-card {
   margin-left: 52px;

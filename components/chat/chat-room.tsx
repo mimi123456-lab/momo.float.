@@ -57,7 +57,7 @@ import { useKeyboardDismissAutoSend } from "@/components/chat/use-keyboard-dismi
 import { cancelBailoutKey } from "@/lib/push-bailout-client";
 import { PENDING_REPLY_PREFIX } from "@/lib/friend-request-engine";
 import type { UserIdentity } from "@/components/settings/user-identity";
-import { AlertCircle, Blocks, Bookmark, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
+import { AlertCircle, Activity, Blocks, Bookmark, Check, Trash2, User, ChevronLeft, ChevronRight, Clapperboard, Clock, Gift, Languages, Loader2, MoreHorizontal, X } from "lucide-react";
 import { setDebugChatState } from "@/lib/debug-store";
 import { SessionCustomCSS } from "@/components/ui/session-custom-css";
 import { setChatActive } from "@/lib/music-action-queue";
@@ -1175,6 +1175,8 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
     const [customPlusActions, setCustomPlusActions] = useState<RegisteredCustomAppChatPlusAction[]>(() => loadCustomAppChatPlusActions());
     const [activeCustomChatPlus, setActiveCustomChatPlus] = useState<ActiveCustomChatPlus | null>(null);
     const [showSettings, setShowSettings] = useState(false);
+    // 线下状态栏改成右上角按钮弹出，不再常驻消息流顶部。
+    const [showOfflineStatus, setShowOfflineStatus] = useState(false);
     const [showVoiceCall, setShowVoiceCall] = useState(false);
     const [showVideoCall, setShowVideoCall] = useState(false);
     const [callMinimized, setCallMinimized] = useState(false);
@@ -6074,12 +6076,36 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
                         )}
                     </span>
                     <span className="page-header-right">
+                        {offlineMode && offlineStatusPanel && (
+                            <button className="page-back-btn" type="button" onClick={() => setShowOfflineStatus(value => !value)} aria-label="状态">
+                                <Activity size={22} strokeWidth={1.5} />
+                            </button>
+                        )}
                         <button className="page-back-btn" type="button" onClick={() => setShowSettings(true)} aria-label="更多">
                             <MoreHorizontal size={22} strokeWidth={1.5} />
                         </button>
                     </span>
                 </div>
             </header>
+            {offlineMode && offlineStatusPanel && showOfflineStatus && (
+                <div className="chat-status-popover-mask" onClick={() => setShowOfflineStatus(false)}>
+                    <div className="chat-status-popover" onClick={(event) => event.stopPropagation()}>
+                        <div className="chat-status-popover-head">
+                            <span>当前状态</span>
+                            <button type="button" className="chat-status-popover-close" onClick={() => setShowOfflineStatus(false)} aria-label="关闭">
+                                <X size={16} />
+                            </button>
+                        </div>
+                        <div className="chat-status-popover-body chat-status-bare">
+                            {offlineCustomStatusActive && offlineStatusRegionCfg.renderHtml.trim() ? (
+                                <CustomStatusFrame html={offlineStatusRegionCfg.renderHtml} raw={offlineStatusPanel} />
+                            ) : (
+                                <BilingualTextBlock text={offlineStatusPanel} mode="markdown" defaultExpanded={session.collapseBilingualTranslation !== false ? false : true} htmlFrameVariant="offline" />
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
             <ChatPluginSlot
                 name="chat.header"
                 slotProps={{ sessionId: session.id, isGroup: !!session.isGroup }}
@@ -6102,15 +6128,6 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
             >
                 {offlineMode && (
                     <div className="chat-offline-body">
-                        {offlineStatusPanel && (
-                            <div className="chat-status-bare">
-                                {offlineCustomStatusActive && offlineStatusRegionCfg.renderHtml.trim() ? (
-                                    <CustomStatusFrame html={offlineStatusRegionCfg.renderHtml} raw={offlineStatusPanel} />
-                                ) : (
-                                    <BilingualTextBlock text={offlineStatusPanel} mode="markdown" defaultExpanded={session.collapseBilingualTranslation !== false ? false : true} htmlFrameVariant="offline" />
-                                )}
-                            </div>
-                        )}
                         {offlineTurns.length === 0 && !pendingOfflineUserText ? (
                             <div className="chat-offline-empty">
                                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 10c0 7-9 13-9 13S3 17 3 10a9 9 0 0 1 18 0Z" /><circle cx="12" cy="10" r="3" /></svg>
