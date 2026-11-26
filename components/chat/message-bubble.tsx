@@ -229,6 +229,39 @@ function MeetingInviteBubble({
             </section>
         );
     }
+
+    const isStoryInvite = msg.mediaData?.meetingInviteMode === "story";
+    if (isStoryInvite) {
+        const storyTitle = msg.mediaData?.meetingInviteStoryTitle || title;
+        const storyOpening = msg.mediaData?.meetingInviteStoryOpening || description;
+        const mood = msg.mediaData?.meetingInviteMood?.trim();
+        return (
+            <section className="story-invite-card" data-status={status}>
+                <style>{`.story-invite-card{position:relative;width:250px;max-width:72vw;padding:18px 16px 14px;border-radius:18px;overflow:hidden;color:#ece6da;background:linear-gradient(158deg,#14151a 0%,#1d1e24 48%,#0a0b0e 100%);border:1px solid rgba(200,169,106,.34);box-shadow:0 16px 40px rgba(6,7,10,.5),inset 0 1px 0 rgba(255,255,255,.05)}.story-invite-card::before{content:"";position:absolute;top:-40px;right:-30px;width:130px;height:130px;border-radius:50%;background:radial-gradient(circle,rgba(200,169,106,.26),transparent 68%);pointer-events:none}.story-invite-card::after{content:"";position:absolute;left:0;right:0;top:0;height:1px;background:linear-gradient(90deg,transparent,rgba(226,200,145,.65),transparent)}.story-invite-eyebrow{position:relative;font-size:9px;letter-spacing:.28em;color:#c8a96a;font-weight:700;margin-bottom:9px}.story-invite-title{position:relative;display:block;font-size:16px;line-height:1.42;color:#f4efe4;font-weight:700;letter-spacing:.01em}.story-invite-mood{position:relative;display:inline-flex;align-items:center;gap:4px;margin-top:9px;padding:3px 9px;border-radius:999px;font-size:9px;letter-spacing:.08em;color:#d8c193;background:rgba(200,169,106,.12);border:1px solid rgba(200,169,106,.28)}.story-invite-opening{position:relative;margin:11px 0 15px;font-size:12px;line-height:1.72;color:rgba(236,230,218,.72);display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}.story-invite-actions{position:relative;display:flex;gap:8px}.story-invite-actions button{flex:1;border-radius:11px;padding:10px 0;font-size:12px;font-weight:700;cursor:pointer;transition:transform .15s ease,filter .15s ease}.story-invite-actions button:active{transform:scale(.97)}.story-invite-enter{border:0;color:#1a1509;background:linear-gradient(135deg,#e6cf9a,#c8a96a 55%,#a8894d);box-shadow:0 8px 20px rgba(200,169,106,.26)}.story-invite-later{flex:.78!important;border:1px solid rgba(236,230,218,.2);background:rgba(255,255,255,.03);color:rgba(236,230,218,.72)}.story-invite-result{position:relative;padding:2px 0 4px;font-size:12px;color:rgba(236,230,218,.7)}.story-invite-foot{position:relative;display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding-top:10px;border-top:1px solid rgba(236,230,218,.1);font-size:8px;letter-spacing:.22em;color:rgba(200,169,106,.62)}.story-invite-card[data-status="declined"]{filter:saturate(.4) brightness(.92)}`}</style>
+                <div className="story-invite-eyebrow">STORY INVITATION</div>
+                <strong className="story-invite-title">{storyTitle}</strong>
+                {mood ? <span className="story-invite-mood">✦ {mood}</span> : null}
+                <p className="story-invite-opening">{storyOpening}</p>
+                {status === "pending" ? (
+                    <div className="story-invite-actions">
+                        <button type="button" className="story-invite-enter" onClick={() => onAction?.(msg, "story")}>
+                            进入剧情
+                        </button>
+                        <button type="button" className="story-invite-later" onClick={() => onAction?.(msg, "decline")}>
+                            这次不了
+                        </button>
+                    </div>
+                ) : (
+                    <div className="story-invite-result">{resolvedLabel}</div>
+                )}
+                <div className="story-invite-foot">
+                    <span>AI PHONE · STORY</span>
+                    <span>{inviter}</span>
+                </div>
+            </section>
+        );
+    }
+
     return (
         <section className="meeting-invite-card" data-status={status}>
             <style>{`.meeting-invite-card{width:250px;max-width:72vw;padding:16px;border-radius:16px;background:linear-gradient(145deg,#fffaf2,#fff);border:1px solid rgba(160,120,76,.18);box-shadow:0 8px 24px rgba(82,58,34,.10);color:#47382d}.meeting-invite-eyebrow{font-size:11px;letter-spacing:.16em;opacity:.56;margin-bottom:8px}.meeting-invite-title{display:block;font-size:15px;line-height:1.45}.meeting-invite-desc{margin:7px 0 14px;font-size:12px;opacity:.65}.meeting-invite-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.meeting-invite-actions button{border-radius:10px;padding:9px 8px}.meeting-invite-decline{grid-column:1 / -1;border:1px solid rgba(71,56,45,.16);background:rgba(255,255,255,.72);color:inherit}.meeting-invite-story{border:1px solid rgba(71,56,45,.16);background:rgba(255,255,255,.72);color:inherit}.meeting-invite-accept{border:0;background:#4b4038;color:#fff}.meeting-invite-result{padding-top:3px;font-size:12px;opacity:.72}`}</style>
@@ -1229,6 +1262,13 @@ function GiftBubble({ msg }: { msg: ChatMessage }) {
                         <GiftInfoCell label="礼物值" value={d?.giftPriceLabel || "心意礼物"} />
                         {sentLabel && <GiftInfoCell label="送出" value={sentLabel} />}
                     </div>
+
+                    {d?.giftNote && (
+                        <div className="mt-4 rounded-md border-l-2 border-[var(--c-icon-rose,#d98a9a)] bg-[color-mix(in_srgb,var(--c-icon-rose,#d98a9a)_10%,transparent)] px-3 py-2">
+                            <div className="ts-10 uppercase font-semibold tracking-normal text-[var(--c-icon)]">附言</div>
+                            <p className="ts-12 mt-1 leading-relaxed text-[var(--c-text)] whitespace-pre-wrap break-words">{d.giftNote}</p>
+                        </div>
+                    )}
 
                     <div className="flex-1" />
 

@@ -19971,3 +19971,175 @@
 .cp-scroll-guard > * {
   flex-shrink: 0;
 }
+
+/* ── 购物：送礼选择 + 累积分页加载 ─────────────────────── */
+.cp-shopping-gift-toast {
+  bottom: calc(196px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(135deg, #ff7a1a, #ff5b7f);
+}
+
+.cp-shopping-gift-picker {
+  margin-bottom: 14px;
+  padding: 12px 12px 10px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 107, 0, 0.16);
+  background: linear-gradient(180deg, #fffaf5, #ffffff);
+}
+
+.cp-shopping-gift-picker-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+
+.cp-shopping-gift-picker-head > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #b4571a;
+  font-size: calc(12px*var(--app-text-scale,1));
+  font-weight: 800;
+}
+
+.cp-shopping-gift-picker-head > small {
+  min-width: 0;
+  color: #a08a7a;
+  font-size: calc(10px*var(--app-text-scale,1));
+  text-align: right;
+}
+
+.cp-shopping-gift-picker-list {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 2px 2px 4px;
+  scrollbar-width: none;
+}
+
+.cp-shopping-gift-picker-list::-webkit-scrollbar { display: none; }
+
+.cp-shopping-gift-option {
+  flex: 0 0 auto;
+  width: 56px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+.cp-shopping-gift-option em {
+  max-width: 56px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: normal;
+  font-size: calc(10px*var(--app-text-scale,1));
+  color: #7b8494;
+}
+
+.cp-shopping-gift-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  color: #fff;
+  font-size: calc(16px*var(--app-text-scale,1));
+  font-weight: 800;
+  background: linear-gradient(135deg, #f0b6c3, #e08ba1);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+
+.cp-shopping-gift-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.cp-shopping-gift-option.is-self .cp-shopping-gift-avatar {
+  color: #8a8f99;
+  background: #f2f3f5;
+}
+
+.cp-shopping-gift-option[data-active="1"] em { color: #ff6b00; font-weight: 800; }
+
+.cp-shopping-gift-option[data-active="1"] .cp-shopping-gift-avatar {
+  transform: translateY(-1px) scale(1.04);
+  outline: 2.5px solid #ff6b00;
+  outline-offset: 1px;
+  box-shadow: 0 8px 18px rgba(255, 107, 0, 0.24);
+}
+
+.cp-shopping-gift-note {
+  width: 100%;
+  margin-top: 9px;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid #f0e3d8;
+  border-radius: 12px;
+  outline: none;
+  color: #333;
+  background: #fff;
+  font-size: calc(12px*var(--app-text-scale,1));
+}
+
+.cp-shopping-gift-note::placeholder { color: #b9b2ab; }
+
+.cp-shopping-loadmore {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 22px 16px 26px;
+  border: 1px dashed #e6e1da;
+  border-radius: 20px;
+  background: linear-gradient(180deg, #fffdfb, #fff);
+  text-align: center;
+}
+
+.cp-shopping-loadmore-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  color: #ff6b00;
+  background: #fff2e8;
+  margin-bottom: 2px;
+}
+
+.cp-shopping-loadmore strong {
+  font-size: calc(13px*var(--app-text-scale,1));
+  color: #33302c;
+}
+
+.cp-shopping-loadmore > span {
+  font-size: calc(11px*var(--app-text-scale,1));
+  color: #a49b92;
+}
+
+.cp-shopping-loadmore > button {
+  margin-top: 6px;
+  min-height: 38px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  background: linear-gradient(135deg, #ff8a2b, #ff6b00);
+  font-size: calc(12px*var(--app-text-scale,1));
+  font-weight: 800;
+  box-shadow: 0 10px 22px rgba(255, 107, 0, 0.24);
+}
+
+.cp-shopping-loadmore > button:disabled {
+  color: #aaa;
+  background: #eee;
+  box-shadow: none;
+}

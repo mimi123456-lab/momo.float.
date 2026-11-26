@@ -189,6 +189,7 @@ export type ChatMessage = {
         giftTone?: "ivory" | "mist" | "blush" | "graphite";
         giftDeliveredAt?: string;// 到货时间
         giftSentAt?: string;     // 送出时间
+        giftNote?: string;       // 送礼附言
         paymentRequestId?: string; // 代付请求 ID
         shoppingOrderId?: string;  // 代付关联购物订单 ID
         paymentRequestAmountLabel?: string; // 代付金额展示
@@ -262,6 +263,11 @@ export type ChatMessage = {
         meetingInviteDescription?: string;
         meetingInviteAcceptResponse?: string;
         meetingInviteDeclineResponse?: string;
+        /** offline=现实见面邀请；story=剧情邀请（黑色剧情卡） */
+        meetingInviteMode?: "offline" | "story";
+        meetingInviteStoryTitle?: string;
+        meetingInviteStoryOpening?: string;
+        meetingInviteMood?: string;
         meetingInviteResolvedAt?: string;
         meetingInviteStorySessionId?: string;
         fileType?: "audio" | "image" | "video" | "file";

@@ -4479,6 +4479,8 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
         }
         if (action === "accept") {
             showChatToast("已开始一起听");
+            // 顺手把人带到音乐 App，让她挑的那首歌成为这次一起听的入口
+            window.dispatchEvent(new CustomEvent("open-app", { detail: { appId: "music" } }));
             handleSendText("好呀，一起听。", { autoReply: true });
         } else {
             handleSendText("这次先不了。", { autoReply: true });

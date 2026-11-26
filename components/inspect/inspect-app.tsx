@@ -265,7 +265,9 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
     // 实时回放：一条一条翻，画面同步
     useEffect(() => {
         if (!watching || watching.finished) return;
-        const delay = watching.index === 0 ? 1100 : 2300;
+        // 每一步都放慢：先回桌面看她点开哪个 App，再进入内容慢慢翻。
+        // 太快会看不清到底翻了什么，这里给足阅读时间。
+        const delay = watching.index === 0 ? 2200 : 4800;
         const timer = window.setTimeout(() => {
             const nextIndex = watching.index + 1;
             if (nextIndex >= watching.logs.length) {
@@ -365,9 +367,10 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
     };
 
     const sortedLogs = [...logs].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-    const currentSnapshot = watching && watching.index > 0
-        ? watching.logs[Math.min(watching.index, watching.logs.length) - 1]?.snapshot
+    const currentLog = watching && watching.index > 0
+        ? watching.logs[Math.min(watching.index, watching.logs.length) - 1]
         : undefined;
+    const currentSnapshot = currentLog?.snapshot;
 
     return (
         <div
@@ -644,6 +647,10 @@ export function InspectApp({ onClose, onNotice }: { onClose: () => void; onNotic
                     total={watching.logs.length}
                     finished={watching.finished}
                     hasChatHint={Boolean(chatHintSessionId)}
+                    appId={currentLog?.appId}
+                    actionText={currentLog
+                        ? `${currentLog.appLabel} · ${currentLog.summary}${currentLog.detail ? `（${currentLog.detail}）` : ""}`
+                        : undefined}
                     onClose={() => setWatching(null)}
                     onInterrupt={interruptWatch}
                     onGoChat={openHintChat}

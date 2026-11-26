@@ -30,6 +30,11 @@ import { Toggle } from "./ui/form";
 import { loadChatAppSettings, saveChatAppSettings } from "@/lib/chat-storage";
 import { loadApiConfigs, loadBindingConfig, saveBindingConfig } from "@/lib/settings-storage";
 import { loadKeepAlive, saveKeepAlive } from "@/lib/weixin-storage";
+import {
+    getKeepAliveStatus,
+    KEEP_ALIVE_STATUS_EVENT,
+    type KeepAliveRuntimeStatus,
+} from "@/lib/use-weixin-bridge";
 import { BINDING_ACCENTS, CONTENT_APP_ACCENTS } from "@/lib/ui-accent-colors";
 
 export const SettingsContext = createContext<{
@@ -171,6 +176,7 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
     const [floatingDockEnabled, setFloatingDockEnabled] = useState(false);
     const [floatingDockSheetOpen, setFloatingDockSheetOpen] = useState(false);
     const [keepAlive, setKeepAlive] = useState(false);
+    const [keepAliveStatus, setKeepAliveStatus] = useState<KeepAliveRuntimeStatus>(() => getKeepAliveStatus());
     // 角色电脑：施工中弹窗（返回 / 仍要看看）
     const pageBodyRef = useRef<HTMLDivElement | null>(null);
 
@@ -426,6 +432,14 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
         setKeepAlive(loadKeepAlive());
     }, []);
 
+    // 保活运行状态（是否真的在后台驻留），由常驻服务广播
+    useEffect(() => {
+        const sync = () => setKeepAliveStatus(getKeepAliveStatus());
+        sync();
+        window.addEventListener(KEEP_ALIVE_STATUS_EVENT, sync);
+        return () => window.removeEventListener(KEEP_ALIVE_STATUS_EVENT, sync);
+    }, []);
+
     // Listen for mascot navigation mode (e.g. jump to worldbook/regex tab)
     useEffect(() => {
         const onMode = (e: Event) => {
@@ -519,7 +533,21 @@ export function PhoneSettingsApp({ onClose, onNotice }: SettingsPageProps) {
                                 </span>
                                 <div className="card-featured-body">
                                     <div className="card-featured-label">后台保活</div>
-                                    <div className="card-featured-desc">切到后台时尽量保持网页运行，主动消息与轮询不中断</div>
+                                    <div className="card-featured-desc">
+                                        {keepAlive
+                                            ? keepAliveStatus.audioPlaying
+                                                ? "运行中 · 已常驻后台，主动消息与轮询不中断"
+                                                : keepAliveStatus.waitingGesture
+                                                    ? "已开启 · 点一下屏幕即可完成激活"
+                                                    : "已开启 · 正在恢复后台驻留…"
+                                            : "切到后台时尽量保持网页运行，主动消息与轮询不中断"}
+                                    </div>
+                                    {keepAlive ? (
+                                        <span className="settings-keepalive-dot" data-on={keepAliveStatus.audioPlaying ? "1" : "0"}>
+                                            <i />
+                                            {keepAliveStatus.audioPlaying ? "后台服务运行中" : "等待恢复"}
+                                        </span>
+                                    ) : null}
                                 </div>
                                 <Toggle checked={keepAlive} onChange={handleKeepAliveChange} className="settings-toggle-control" />
                             </div>

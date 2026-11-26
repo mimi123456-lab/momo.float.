@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronLeft,
   CreditCard,
+  Gift,
   Heart,
   HeartHandshake,
   Home,
@@ -46,7 +47,7 @@ import {
   type ShoppingPaymentStatus,
 } from "@/lib/shopping-payment-request";
 import { createDefaultShoppingState, loadShoppingState, saveShoppingState, SHOPPING_STATE_UPDATED_EVENT } from "@/lib/shopping-storage";
-import type { ShoppingCartItem, ShoppingCategory, ShoppingOrder, ShoppingProduct, ShoppingShippingEvent, ShoppingState } from "@/lib/shopping-types";
+import type { ShoppingCartItem, ShoppingCatalog, ShoppingCategory, ShoppingOrder, ShoppingProduct, ShoppingShippingEvent, ShoppingState } from "@/lib/shopping-types";
 import {
   formatWalletAmount,
   getWalletBalance,
@@ -220,8 +221,38 @@ function orderMatchesSearch(order: ShoppingOrder, normalizedQuery: string, nowMs
   ], normalizedQuery);
 }
 
-function normalizeDeliverySettings(settings: Pick<ShoppingState["settings"], "deliveryMinMinutes" | "deliveryMaxMinutes">) {
-  const min = normalizeDeliveryMinutes(settings.deliveryMinMinutes, DEFAULT_DELIVERY_MIN_MINUTES);
+/**
+ * 累积分页：把新刷出的一批商品合并进现有货架，按商品 id 去重。
+ * 这样「刷新」不会再让之前浏览过的商品消失，用户可以一直往下加载。
+ */
+function mergeShoppingCatalogs(existing: ShoppingCatalog, incoming: ShoppingCatalog): ShoppingCatalog {
+  const categoryMap = new Map(existing.categories.map(category => [
+    category.id,
+    { ...category, items: [...category.items] },
+  ]));
+  for (const category of incoming.categories) {
+    const current = categoryMap.get(category.id);
+    if (!current) {
+      categoryMap.set(category.id, { ...category, items: [...category.items] });
+      continue;
+    }
+    const seen = new Set(current.items.map(item => item.id));
+    for (const item of category.items) {
+      if (seen.has(item.id)) continue;
+      seen.add(item.id);
+      current.items.push(item);
+    }
+    // 每个分类最多累积 60 条，避免货架无限膨胀。
+    if (current.items.length > 60) current.items = current.items.slice(0, 60);
+  }
+  const orderIndex = new Map(SHOPPING_RECOMMENDATION_CATEGORIES.map((category, index) => [category.id, index]));
+  const categories = Array.from(categoryMap.values())
+    .filter(category => category.items.length > 0)
+    .sort((a, b) => (orderIndex.get(a.id) ?? 99) - (orderIndex.get(b.id) ?? 99));
+  return { categories, recommendations: categories.flatMap(category => category.items) };
+}
+
+function normalizeDeliverySettings(settings: Pick<ShoppingState["settings"], "deliveryMinMinutes" | "deliveryMaxMinutes">) {  const min = normalizeDeliveryMinutes(settings.deliveryMinMinutes, DEFAULT_DELIVERY_MIN_MINUTES);
   const max = normalizeDeliveryMinutes(settings.deliveryMaxMinutes, DEFAULT_DELIVERY_MAX_MINUTES);
   return {
     deliveryMinMinutes: Math.min(min, max),
@@ -395,7 +426,7 @@ function buildOrderFromCart(
 export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: ShoppingAppProps) {
   const [state, setState] = useState<ShoppingState>(() => createDefaultShoppingState());
   const [loaded, setLoaded] = useState(false);
-  const [loadingTask, setLoadingTask] = useState<"refresh" | "search" | null>(null);
+  const [loadingTask, setLoadingTask] = useState<"refresh" | "refresh-more" | "search" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [debugRawOutput, setDebugRawOutput] = useState<string | null>(null);
   const [selectedTab, setSelectedTab] = useState<ShoppingTabId>("home");
@@ -432,6 +463,12 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
   const [walletState, setWalletState] = useState<WalletState>(() => loadWalletState());
   const [selectedPaymentSourceId, setSelectedPaymentSourceId] = useState<string>(WALLET_BALANCE_ACCOUNT_ID);
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  // 付款时把商品作为礼物送给某个角色
+  const [giftRecipientId, setGiftRecipientId] = useState("");
+  const [giftNote, setGiftNote] = useState("");
+  const [giftTargets, setGiftTargets] = useState<Character[]>([]);
+  const [giftNotice, setGiftNotice] = useState<string | null>(null);
+  const giftNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [blackMarketOpen, setBlackMarketOpen] = useState(false);
   const [blackMarketTransition, setBlackMarketTransition] = useState(false);
   const cartFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -478,6 +515,9 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
     }
     if (blackMarketTransitionTimerRef.current) {
       clearTimeout(blackMarketTransitionTimerRef.current);
+    }
+    if (giftNoticeTimerRef.current) {
+      clearTimeout(giftNoticeTimerRef.current);
     }
     if (scrollRestoreFrameRef.current !== null) {
       window.cancelAnimationFrame(scrollRestoreFrameRef.current);
@@ -546,7 +586,11 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
   const savedIds = useMemo(() => new Set(state.savedItems.map(item => item.id)), [state.savedItems]);
   const cartIds = useMemo(() => new Set(state.cartItems.map(item => item.id)), [state.cartItems]);
   const loading = loadingTask !== null;
-  const loadingLabel = loadingTask === "search" ? "正在搜索新物品" : "正在刷新商品";
+  const loadingLabel = loadingTask === "search"
+    ? "正在搜索新物品"
+    : loadingTask === "refresh-more"
+      ? "正在加载更多商品"
+      : "正在刷新商品";
   const catalogCategories: ShoppingCategory[] = state.catalog.categories.length > 0
     ? state.catalog.categories
     : state.catalog.recommendations.length > 0
@@ -635,20 +679,23 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
     setSelectedTab(tabId);
   }
 
-  async function handleRefresh() {
+  async function handleRefresh(options: { append?: boolean } = {}) {
     if (loading) return;
-    setLoadingTask("refresh");
+    const append = options.append === true;
+    setLoadingTask(append ? "refresh-more" : "refresh");
     setError(null);
     setDebugRawOutput(null);
     const result = await generateShoppingCatalog(state.settings.refreshPrompt);
     if (result.catalog) {
       persist(current => ({
         ...current,
-        catalog: result.catalog!,
+        catalog: append ? mergeShoppingCatalogs(current.catalog, result.catalog!) : result.catalog!,
         generatedAt: new Date().toISOString(),
       }));
-      setSelectedProduct(null);
-      setSelectedOrderId(null);
+      if (!append) {
+        setSelectedProduct(null);
+        setSelectedOrderId(null);
+      }
       setTranslationPreview(null);
     }
     setError(result.error ?? null);
@@ -845,9 +892,56 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
     if (state.cartItems.length === 0) return;
     const nextWalletState = loadWalletState();
     setWalletState(nextWalletState);
+    setGiftTargets(loadCharacters());
     setSelectedPaymentSourceId(WALLET_BALANCE_ACCOUNT_ID);
     setPaymentError(null);
     setConfirmCheckoutOpen(true);
+  }
+
+  /** 付款完成后，把订单里的商品作为礼物直接发到角色聊天。 */
+  function sendOrderGiftsToCharacter(target: Character, order: ShoppingOrder, note: string) {
+    const session = createOrGetSession(target.id);
+    const sentAt = new Date().toISOString();
+    order.items.forEach((item, index) => {
+      pushChatMessage({
+        sessionId: session.id,
+        role: "user",
+        content: "",
+        mediaType: "gift",
+        mediaData: {
+          label: item.title,
+          giftName: item.title,
+          shoppingGiftId: `${order.id}::${item.id || index}::1`,
+          giftOrderId: order.id,
+          giftItemId: item.id,
+          giftMerchantLabel: item.merchantLabel || order.merchantLabel,
+          giftPriceLabel: item.priceLabel,
+          giftPreviewIcon: item.previewIcon,
+          giftTone: item.tone,
+          giftSentAt: sentAt,
+          giftNote: note || undefined,
+          recipientId: target.id,
+          recipientName: target.name,
+          senderName: "你",
+        },
+      });
+    });
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("chat-messages-updated", { detail: { sessionId: session.id } }));
+      // 让角色对着礼物回一句，避免聊天里只有一张冷冰冰的卡片
+      window.setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("ai-chat-request-reply", { detail: { sessionId: session.id } }));
+      }, 1400);
+    }
+  }
+
+  function showGiftNotice(text: string) {
+    if (giftNoticeTimerRef.current) clearTimeout(giftNoticeTimerRef.current);
+    setGiftNotice(text);
+    giftNoticeTimerRef.current = setTimeout(() => {
+      setGiftNotice(null);
+      giftNoticeTimerRef.current = null;
+    }, 2600);
   }
 
   function openPaymentRequestSheet() {
@@ -955,6 +1049,14 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
       orders: [paidOrder, ...current.orders],
       cartItems: [],
     }));
+    const giftTarget = giftRecipientId
+      ? giftTargets.find(target => target.id === giftRecipientId)
+      : undefined;
+    if (giftTarget) {
+      sendOrderGiftsToCharacter(giftTarget, paidOrder, giftNote.trim());
+      showGiftNotice(`礼物已送给 ${giftTarget.name}，已发到聊天`);
+      setGiftNote("");
+    }
     setSelectedTab("orders");
     setSelectedOrderId(paidOrder.id);
     setPaymentError(null);
@@ -1177,6 +1279,13 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
         </div>
       ) : null}
 
+      {giftNotice ? (
+        <div className="cp-shopping-cart-toast cp-shopping-gift-toast" role="status" aria-live="polite">
+          <Gift size={16} />
+          <span>{giftNotice}</span>
+        </div>
+      ) : null}
+
       {blackMarketTransition ? (
         <div className="cp-shopping-black-market-gate" role="status" aria-live="polite">
           <div className="cp-shopping-black-market-gate-noise" />
@@ -1313,6 +1422,23 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
                       </div>
                     </section>
                   )) : null}
+
+                  {selectedCategoryId !== "search" ? (
+                    <section className="cp-shopping-loadmore">
+                      <div className="cp-shopping-loadmore-icon">
+                        <RefreshCw size={18} className={loadingTask === "refresh-more" ? "cp-spin" : ""} />
+                      </div>
+                      <strong>下拉查看更多商品</strong>
+                      <span>已浏览的商品都会保留，继续往下刷一批新的</span>
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => void handleRefresh({ append: true })}
+                      >
+                        {loadingTask === "refresh-more" ? "正在加载…" : "加载更多商品"}
+                      </button>
+                    </section>
+                  ) : null}
                 </>
               ) : null}
 
@@ -1883,6 +2009,49 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
               <CreditCard size={24} color="#ff6b00" />
             </div>
 
+            <div className="cp-shopping-gift-picker">
+              <div className="cp-shopping-gift-picker-head">
+                <span><Gift size={14} /> 作为礼物送给 TA</span>
+                <small>{giftRecipientId ? "付款后礼物会自动发到 TA 的聊天" : "不选则只给自己下单"}</small>
+              </div>
+              <div className="cp-shopping-gift-picker-list">
+                <button
+                  type="button"
+                  className="cp-shopping-gift-option is-self"
+                  data-active={giftRecipientId === ""}
+                  onClick={() => setGiftRecipientId("")}
+                >
+                  <span className="cp-shopping-gift-avatar">自</span>
+                  <em>自用</em>
+                </button>
+                {giftTargets.map(target => (
+                  <button
+                    key={target.id}
+                    type="button"
+                    className="cp-shopping-gift-option"
+                    data-active={giftRecipientId === target.id}
+                    onClick={() => setGiftRecipientId(target.id)}
+                  >
+                    <span className="cp-shopping-gift-avatar">
+                      {target.avatar
+                        ? <img src={target.avatar} alt="" />
+                        : target.name.slice(0, 1)}
+                    </span>
+                    <em>{target.name}</em>
+                  </button>
+                ))}
+              </div>
+              {giftRecipientId ? (
+                <input
+                  className="cp-shopping-gift-note"
+                  value={giftNote}
+                  maxLength={60}
+                  onChange={event => setGiftNote(event.target.value)}
+                  placeholder="写一句附言，会和礼物一起送达（可选）"
+                />
+              ) : null}
+            </div>
+
             <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "42vh", overflowY: "auto", paddingRight: "2px" }}>
               {[
                 {
@@ -2067,13 +2236,13 @@ export function ShoppingApp({ onClose, visible = true, onIdle, onBusyChange }: S
       {confirmRefreshOpen && (
         <ConfirmDialog
           title="刷新首页推荐？"
-          message="将重新生成首页分类推荐。收藏、购物车和订单不会受影响。"
+          message="将再生成一批首页分类推荐，追加在现有商品后面。收藏、购物车和订单不会受影响。"
           variant="action"
           confirmLabel="刷新"
           cancelLabel="取消"
           onConfirm={() => {
             setConfirmRefreshOpen(false);
-            void handleRefresh();
+            void handleRefresh({ append: true });
           }}
           onCancel={() => setConfirmRefreshOpen(false)}
         />

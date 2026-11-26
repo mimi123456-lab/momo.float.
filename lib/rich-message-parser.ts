@@ -304,6 +304,36 @@ const RICH_PATTERNS: {
         }),
     },
     {
+        // 角色主动邀请一起听歌：[邀请一起听:晴天 - 周杰伦]
+        regex: /\[邀请一起听[：:]\s*([^\]\n]{1,80})\]/,
+        build: (m) => {
+            const raw = (m[1] || "").trim();
+            const segments = raw.split(/\s*[-—–]\s*/);
+            const title = (segments[0] || raw).trim();
+            const artist = segments.length > 1 ? segments.slice(1).join(" - ").trim() : "";
+            return {
+                content: `想和你一起听《${title}》`,
+                mediaType: "music_invite" as const,
+                mediaData: {
+                    musicTitle: title,
+                    musicArtist: artist,
+                    label: artist ? `${title} - ${artist}` : title,
+                    musicInviteStatus: "pending" as const,
+                    musicInviteFrom: "character" as const,
+                },
+            };
+        },
+    },
+    {
+        // 角色把你拉进一段剧情：渲染成黑色剧情邀请卡。
+        regex: /\[(?:剧情邀请|邀请进入剧情|剧情卡片)\]/,
+        build: () => ({
+            content: "想和你走进一段剧情",
+            mediaType: "meeting_invite" as const,
+            mediaData: { meetingInviteStatus: "pending" as const, meetingInviteMode: "story" as const },
+        }),
+    },
+    {
         // 角色主动邀请开启情侣空间。
         regex: /\[(?:情侣空间邀请|邀请情侣空间|开启情侣空间)\]/,
         build: () => ({
@@ -800,17 +830,25 @@ export function parseAIResponse(rawText: string, previousState: StateValue[]): P
         parseSegment(seg, parts);
     }
     if (meetingInvite.raw) {
+        const inviteFields = meetingInvite.fields;
+        const isStoryInvite = /剧情/.test(inviteFields["模式"] || "");
         parts.push({
-            content: meetingInvite.fields["标题"] || "线下见面邀请",
+            content: inviteFields["标题"] || "线下见面邀请",
             mediaType: "meeting_invite",
             mediaData: {
                 meetingInviteStatus: "pending",
                 meetingInviteRaw: meetingInvite.raw,
-                meetingInviteCharacterName: meetingInvite.fields["邀请人"],
-                meetingInviteTitle: meetingInvite.fields["标题"],
-                meetingInviteDescription: meetingInvite.fields["说明"],
-                meetingInviteAcceptResponse: meetingInvite.fields["同意反应"],
-                meetingInviteDeclineResponse: meetingInvite.fields["拒绝反应"],
+                meetingInviteCharacterName: inviteFields["邀请人"],
+                meetingInviteTitle: inviteFields["标题"],
+                meetingInviteDescription: inviteFields["说明"],
+                meetingInviteAcceptResponse: inviteFields["同意反应"],
+                meetingInviteDeclineResponse: inviteFields["拒绝反应"],
+                ...(isStoryInvite ? {
+                    meetingInviteMode: "story" as const,
+                    meetingInviteStoryTitle: inviteFields["剧情标题"] || inviteFields["剧情"],
+                    meetingInviteStoryOpening: inviteFields["开场"],
+                    meetingInviteMood: inviteFields["氛围"],
+                } : {}),
             },
         });
     }

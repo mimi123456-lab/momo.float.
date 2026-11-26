@@ -44,6 +44,7 @@ import {
   mdiMessageText,
   mdiTheater,
   mdiMagnify,
+  mdiImageMultiple,
 } from "@mdi/js";
 
 type IconGlyphProps = {
@@ -88,6 +89,7 @@ const MDI_PATHS: Record<IconId, string> = {
   theater: mdiTheater,
   couplespace: mdiHeart,
   inspect: mdiMagnify,
+  album: mdiImageMultiple,
 };
 
 export function IconGlyph({ id, className }: IconGlyphProps) {

@@ -43,6 +43,7 @@ import { TheaterApp } from "@/components/theater/theater-app";
 import { CoupleSpaceApp } from "@/components/couple-space/couple-space-app";
 import { InspectApp } from "@/components/inspect/inspect-app";
 import { InspectAutopilot } from "@/components/inspect/inspect-autopilot";
+import { AlbumApp } from "@/components/album/album-app";
 import { ShoppingApp } from "@/components/shopping/shopping-app";
 import { GameHubApp } from "@/components/game/game-hub-app";
 import { MixologyApp } from "@/components/mixology/mixology-app";
@@ -116,8 +117,8 @@ import { GRID_COLS, GRID_ROWS, WIDGET_SIZE_CELLS, WIDGET_CATALOG, type WidgetIns
 import { buildOccupancyGrid, canPlaceWidget, placeWidget, createDefaultWidgets, loadWidgets, saveWidgets, loadDIYTemplates, saveDIYTemplates } from "@/lib/widget-storage";
 import {
   createDefaultDesktopIconLayout,
-  getDesktopIconLayoutItems,
-  getDesktopPageKey,
+  appendNewlyAddedBuiltinIcons,
+  getDesktopIconLayoutItems,  getDesktopPageKey,
   getDesktopPageKeys,
   getDesktopPageNumber,
   loadDockLayout,
@@ -1501,11 +1502,13 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
         try {
           const normalized = normalizeLayout(JSON.parse(rawV2), hydratedWidgets, dockIds, hydratedFolders);
           const sane = sanitizeDesktopFolders(hydratedFolders, normalized, hydratedDock, hydratedWidgets);
+          // 新版本新增的内置 App（如相册）补一次桌面位置
+          const seededLayout = appendNewlyAddedBuiltinIcons(sane.layout, hydratedWidgets, hydratedDock);
           setFolders(sane.folders);
-          setLayout(sane.layout);
-          if (sane.changed) {
+          setLayout(seededLayout);
+          if (sane.changed || seededLayout !== sane.layout) {
             writeDesktopFolders(sane.folders);
-            kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(sane.layout));
+            kvSet(ICON_LAYOUT_STORAGE_KEY, JSON.stringify(seededLayout));
           }
           setDesktopReady(true);
           return;
@@ -4091,6 +4094,10 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
 
     if (activeApp === "inspect") {
       return <InspectApp onClose={() => setActiveApp(null)} onNotice={setNotice} />;
+    }
+
+    if (activeApp === "album") {
+      return <AlbumApp onClose={() => setActiveApp(null)} />;
     }
 
     if (activeApp === "calendar") {

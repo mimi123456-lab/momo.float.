@@ -6177,3 +6177,37 @@
   gap: 6px;
   padding: 0 10px 8px;
 }
+
+/* 后台保活运行状态 */
+.settings-keepalive-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+  font-size: calc(10px*var(--app-text-scale,1));
+  font-weight: 600;
+  color: var(--c-icon, #8a94a4);
+}
+
+.settings-keepalive-dot i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #c3c9d2;
+  box-shadow: 0 0 0 3px rgba(195, 201, 210, .22);
+}
+
+.settings-keepalive-dot[data-on="1"] {
+  color: #3f9d6b;
+}
+
+.settings-keepalive-dot[data-on="1"] i {
+  background: #3f9d6b;
+  box-shadow: 0 0 0 3px rgba(63, 157, 107, .18);
+  animation: settings-keepalive-pulse 2s ease-in-out infinite;
+}
+
+@keyframes settings-keepalive-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .45; }
+}

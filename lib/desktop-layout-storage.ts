@@ -239,8 +239,71 @@ export function appendMissingCustomAppIcons(
   return next;
 }
 
-// ── Desktop folders ───────────────────────────────────
-// 文件夹内容表：folder:xxx → { name, icons }。tile 本身作为普通图标
+// ── 新增内置图标的桌面播种 ─────────────────────────────
+// 老用户已经存过布局，新版本加的 App 不会自动出现在桌面上。
+// 这里按"每个新图标只介绍一次"的方式补到最靠后的空白格子里；
+// 用户自己删掉的图标不会被反复塞回来。
+
+/** 新增内置图标登记处：以后再加内置 App，把 id 加进这个数组即可。 */
+const NEW_BUILTIN_ICON_IDS: IconId[] = ["album"];
+
+const BUILTIN_ICON_SEED_KEY = "ai_phone_desktop_seeded_icons_v1";
+
+function loadSeededBuiltinIconIds(): Set<string> {
+  const raw = kvGet(BUILTIN_ICON_SEED_KEY);
+  if (!raw) return new Set();
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+export function appendNewlyAddedBuiltinIcons(
+  layout: DesktopIconLayout,
+  widgets: WidgetInstance[] = [],
+  dock: DesktopIconId[] = []
+): DesktopIconLayout {
+  if (NEW_BUILTIN_ICON_IDS.length === 0) return layout;
+  const seeded = loadSeededBuiltinIconIds();
+  const pending = NEW_BUILTIN_ICON_IDS.filter((id) => !seeded.has(id));
+  if (pending.length === 0) return layout;
+
+  // 先登记，保证即使本次没放成（理论上不会），也不会每次刷新都重试。
+  kvSet(BUILTIN_ICON_SEED_KEY, JSON.stringify([...seeded, ...pending]));
+
+  const present = new Set<string>(dock);
+  for (const icon of getDesktopIconLayoutItems(layout)) present.add(icon.id);
+  const missing = pending.filter((id) => !present.has(id));
+  if (missing.length === 0) return layout;
+
+  const next = { ...layout } as DesktopIconLayout;
+  const lastPage = Math.max(1, ...getDesktopPageKeys(layout).map(getDesktopPageNumber));
+  let index = 0;
+  for (let page = lastPage; index < missing.length && page <= lastPage + 20; page++) {
+    const pageKey = getDesktopPageKey(page);
+    const icons = next[pageKey] ?? [];
+    const occupied = buildWidgetOccupancy(widgets, page);
+    for (const icon of icons) {
+      if (icon.row >= 1 && icon.row <= GRID_ROWS && icon.col >= 1 && icon.col <= GRID_COLS) {
+        occupied[icon.row - 1][icon.col - 1] = true;
+      }
+    }
+    const placed: IconPosition[] = [];
+    for (let row = 0; row < GRID_ROWS && index < missing.length; row++) {
+      for (let col = 0; col < GRID_COLS && index < missing.length; col++) {
+        if (occupied[row][col]) continue;
+        placed.push({ id: missing[index], row: row + 1, col: col + 1 });
+        index++;
+      }
+    }
+    if (placed.length > 0) next[pageKey] = [...icons, ...placed];
+  }
+  return next;
+}
+
+// ── Desktop folders ───────────────────────────────────// 文件夹内容表：folder:xxx → { name, icons }。tile 本身作为普通图标
 // 存在分页布局里；这张表只管"里面装了什么、叫什么"。
 
 export type DesktopFolder = { name: string; icons: DesktopIconId[] };

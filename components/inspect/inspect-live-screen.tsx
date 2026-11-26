@@ -1,7 +1,17 @@
 "use client";
 
-import type { CSSProperties } from "react";
-import type { InspectSnapshot, InspectSnapshotRow } from "@/lib/inspect-storage";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import type { InspectAppId, InspectSnapshot, InspectSnapshotRow } from "@/lib/inspect-storage";
+import { ICONS, type IconId } from "@/lib/desktop-config";
+import { IconGlyph } from "@/components/icon-glyph";
+import {
+    ICON_LAYOUT_STORAGE_KEY,
+    getDesktopPageKey,
+    loadDockLayout,
+    normalizeDesktopIconLayout,
+} from "@/lib/desktop-layout-storage";
+import { getThemeAssetDataUrl, readThemeProfile } from "@/lib/theme-storage";
+import { kvGet } from "@/lib/kv-db";
 
 type InspectLiveScreenProps = {
     snapshot: InspectSnapshot;
@@ -10,10 +20,112 @@ type InspectLiveScreenProps = {
     total: number;
     finished: boolean;
     hasChatHint: boolean;
+    /** 当前这一步翻的是哪个 App，用来在真实桌面上高亮对应图标 */
+    appId?: InspectAppId;
+    /** 当前动作的白话说明，例如「点开微信 · 停在和某某的对话上」 */
+    actionText?: string;
     onClose: () => void;
     onInterrupt: () => void;
     onGoChat: () => void;
 };
+
+/** 查岗的 App 对应到桌面上的哪个图标 */
+const INSPECT_APP_ICON: Record<InspectAppId, IconId> = {
+    chat: "chat",
+    moments: "moments",
+    forum: "cocreate",
+    shopping: "shopping",
+    photos: "album",
+    sms: "sms",
+    phone: "phone",
+    music: "music",
+    notes: "diary",
+};
+
+/** 镜像用户真实桌面：真实壁纸、真实图标排布、真实 Dock。 */
+function InspectDesktopMirror({ focusAppId }: { focusAppId?: InspectAppId }) {
+    const [wallpaper, setWallpaper] = useState<string | null>(null);
+    const focusIconId = focusAppId ? INSPECT_APP_ICON[focusAppId] : null;
+
+    const layout = useMemo(() => {
+        try {
+            const raw = kvGet(ICON_LAYOUT_STORAGE_KEY);
+            if (!raw) return null;
+            return normalizeDesktopIconLayout(JSON.parse(raw));
+        } catch {
+            return null;
+        }
+    }, []);
+    const dock = useMemo(() => loadDockLayout(), []);
+
+    useEffect(() => {
+        let cancelled = false;
+        const profile = readThemeProfile();
+        if (!profile.wallpaperAssetId) {
+            setWallpaper(null);
+            return () => { cancelled = true; };
+        }
+        void getThemeAssetDataUrl(profile.wallpaperAssetId).then(url => {
+            if (!cancelled) setWallpaper(url);
+        });
+        return () => { cancelled = true; };
+    }, []);
+
+    const page1 = layout?.[getDesktopPageKey(1)] ?? [];
+    const dockIds = dock.slice(0, 4);
+
+    const renderIcon = (id: string, key: string, compact = false) => {
+        if (id.startsWith("folder:")) {
+            return (
+                <div key={key} className={`inspect-mirror-icon${compact ? " is-dock" : ""}`}>
+                    <div className="inspect-mirror-tile" style={{ background: "rgba(255,255,255,.34)" }}>
+                        <span className="inspect-mirror-folder">▦</span>
+                    </div>
+                    <span className="inspect-mirror-label">文件夹</span>
+                </div>
+            );
+        }
+        const meta = ICONS[id as IconId];
+        if (!meta) return null;
+        const focused = focusIconId === id;
+        return (
+            <div key={key} className={`inspect-mirror-icon${compact ? " is-dock" : ""}${focused ? " is-focus" : ""}`}>
+                <div className="inspect-mirror-tile" style={{ background: meta.tone }}>
+                    <IconGlyph id={id as IconId} className="inspect-mirror-glyph" />
+                </div>
+                <span className="inspect-mirror-label">{meta.label}</span>
+                {focused ? <span className="inspect-mirror-tap" aria-hidden /> : null}
+            </div>
+        );
+    };
+
+    return (
+        <div className="inspect-mirror">
+            {wallpaper
+                ? <div className="inspect-mirror-wallpaper" style={{ backgroundImage: `url(${wallpaper})` }} />
+                : <div className="inspect-mirror-wallpaper is-plain" />}
+            <div className="inspect-mirror-grid">
+                {page1.length === 0
+                    ? ["chat", "shopping", "music", "album"].map((id, index) => renderIcon(id, `fallback-${index}`))
+                    : page1.map((item, index) => (
+                        <div
+                            key={`${item.id}-${index}`}
+                            className="inspect-mirror-cell"
+                            style={{ gridRow: item.row, gridColumn: item.col }}
+                        >
+                            {renderIcon(item.id, `${item.id}-${index}`)}
+                        </div>
+                    ))}
+            </div>
+            <div className="inspect-mirror-dots">
+                <i className="is-active" /><i /><i />
+            </div>
+            <div className="inspect-mirror-dock">
+                {dockIds.map((id, index) => renderIcon(id, `dock-${index}`, true))}
+            </div>
+        </div>
+    );
+}
 
 function clockNow(): string {
     const now = new Date();
@@ -100,11 +212,29 @@ export function InspectLiveScreen({
     total,
     finished,
     hasChatHint,
+    appId,
+    actionText,
     onClose,
     onInterrupt,
     onGoChat,
 }: InspectLiveScreenProps) {
     const progress = total > 0 ? Math.min(100, Math.round((step / total) * 100)) : 0;
+    const [phase, setPhase] = useState<"home" | "app">("home");
+    const stepKey = `${step}-${snapshot.screen}-${snapshot.title}`;
+
+    // 每一步都先回到真实桌面、把手指移到对应 App，再"进入" App 看内容。
+    // 这样用户能看清 TA 点了哪个图标、翻的是哪一页。
+    useEffect(() => {
+        if (finished) {
+            setPhase("app");
+            return;
+        }
+        setPhase("home");
+        const timer = window.setTimeout(() => setPhase("app"), 1800);
+        return () => window.clearTimeout(timer);
+    }, [stepKey, finished]);
+
+    const showMirror = !finished && phase === "home";
 
     return (
         <div className="inspect-live-overlay">
@@ -418,6 +548,133 @@ export function InspectLiveScreen({
                     background: linear-gradient(90deg, #8fc7b6, #5f7f76);
                     transition: width 0.5s ease;
                 }
+                .inspect-live-action {
+                    width: min(92vw, 340px);
+                    display: flex;
+                    align-items: center;
+                    gap: 7px;
+                    padding: 7px 11px;
+                    border-radius: 11px;
+                    background: rgba(255,255,255,0.08);
+                    border: 1px solid rgba(255,255,255,0.09);
+                    color: rgba(255,255,255,0.88);
+                    font-size: 11.5px;
+                    line-height: 1.45;
+                    box-sizing: border-box;
+                }
+                .inspect-live-action-dot {
+                    flex: none;
+                    width: 5px; height: 5px; border-radius: 50%;
+                    background: #8fc7b6;
+                    box-shadow: 0 0 0 3px rgba(143,199,182,0.18);
+                    animation: settings-keepalive-pulse 2s ease-in-out infinite;
+                }
+                .inspect-phone-screen--home {
+                    background: #dfe5ea;
+                }
+                .inspect-mirror {
+                    position: relative;
+                    flex: 1;
+                    min-height: 0;
+                    overflow: hidden;
+                }
+                .inspect-mirror-wallpaper {
+                    position: absolute;
+                    inset: 0;
+                    background-size: cover;
+                    background-position: center;
+                }
+                .inspect-mirror-wallpaper.is-plain {
+                    background: linear-gradient(160deg, #b9c6cf, #8f9aa6 55%, #6d7883);
+                }
+                .inspect-mirror-grid {
+                    position: absolute;
+                    inset: 4px 10px 86px;
+                    display: grid;
+                    grid-template-columns: repeat(4, 1fr);
+                    grid-template-rows: repeat(6, 1fr);
+                }
+                .inspect-mirror-cell {
+                    display: flex;
+                    align-items: flex-start;
+                    justify-content: center;
+                }
+                .inspect-mirror-icon {
+                    position: relative;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 4px;
+                    padding-top: 5px;
+                    width: 100%;
+                }
+                .inspect-mirror-tile {
+                    width: 44px; height: 44px;
+                    border-radius: 12px;
+                    display: grid;
+                    place-items: center;
+                    box-shadow: 0 3px 8px rgba(0,0,0,0.16);
+                    transition: transform 0.2s ease;
+                }
+                .inspect-mirror-glyph { width: 24px; height: 24px; }
+                .inspect-mirror-label {
+                    max-width: 100%;
+                    font-size: 8.5px;
+                    color: #fff;
+                    text-shadow: 0 1px 2px rgba(0,0,0,0.45);
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+                .inspect-mirror-folder { color: #fff; font-size: 17px; }
+                .inspect-mirror-icon.is-focus .inspect-mirror-tile {
+                    outline: 2.5px solid rgba(255,255,255,0.85);
+                    outline-offset: 2px;
+                    animation: inspect-mirror-press 1.6s ease-in-out infinite;
+                    box-shadow: 0 8px 20px rgba(0,0,0,0.32);
+                }
+                .inspect-mirror-tap {
+                    position: absolute;
+                    top: 22px;
+                    width: 22px; height: 22px;
+                    border-radius: 50%;
+                    background: radial-gradient(circle at 35% 35%, rgba(255,255,255,0.95), rgba(255,255,255,0.4) 60%, rgba(255,255,255,0.06) 75%);
+                    border: 1px solid rgba(0,0,0,0.08);
+                    box-shadow: 0 3px 8px rgba(0,0,0,0.25);
+                    animation: inspect-tap 1.6s ease-in-out infinite;
+                }
+                @keyframes inspect-mirror-press {
+                    0%, 100% { transform: scale(1.08); }
+                    50% { transform: scale(0.98); }
+                }
+                .inspect-mirror-dots {
+                    position: absolute;
+                    left: 0; right: 0; bottom: 74px;
+                    display: flex;
+                    justify-content: center;
+                    gap: 4px;
+                }
+                .inspect-mirror-dots i {
+                    width: 4px; height: 4px; border-radius: 50%;
+                    background: rgba(255,255,255,0.42);
+                }
+                .inspect-mirror-dots i.is-active { background: #fff; }
+                .inspect-mirror-dock {
+                    position: absolute;
+                    left: 12px; right: 12px; bottom: 12px;
+                    height: 56px;
+                    border-radius: 18px;
+                    display: flex;
+                    justify-content: space-around;
+                    align-items: center;
+                    background: rgba(255,255,255,0.24);
+                    backdrop-filter: blur(10px);
+                    -webkit-backdrop-filter: blur(10px);
+                }
+                .inspect-mirror-icon.is-dock { padding-top: 0; gap: 2px; width: auto; }
+                .inspect-mirror-icon.is-dock .inspect-mirror-tile { width: 38px; height: 38px; border-radius: 11px; }
+                .inspect-mirror-icon.is-dock .inspect-mirror-glyph { width: 21px; height: 21px; }
+                .inspect-mirror-icon.is-dock .inspect-mirror-label { font-size: 7.5px; }
             `}</style>
 
             <div className="inspect-live-topbar">
@@ -428,23 +685,39 @@ export function InspectLiveScreen({
                 <span className="inspect-live-step">{Math.min(step, total)}/{total}</span>
             </div>
 
+            <div className="inspect-live-action">
+                <span className="inspect-live-action-dot" />
+                {actionText || (finished ? "看完了，把手机放回原处" : "正在走向你的手机…")}
+            </div>
+
             <div className="inspect-phone-frame">
                 <div className="inspect-phone-notch" />
-                <div className="inspect-phone-screen">
-                    <div className="inspect-phone-statusbar">
-                        <span>{clockNow()}</span>
-                        <span style={statusIconsStyle}>●●● ▮</span>
+                {showMirror ? (
+                    <div className="inspect-phone-screen inspect-phone-screen--home">
+                        <div className="inspect-phone-statusbar">
+                            <span>{clockNow()}</span>
+                            <span style={statusIconsStyle}>●●● ▮</span>
+                        </div>
+                        <InspectDesktopMirror focusAppId={appId} />
+                        <div className="inspect-phone-homebar" />
                     </div>
-                    <div className="inspect-phone-navbar">
-                        <span className="inspect-phone-back" />
-                        <span className="inspect-phone-navtitle">{snapshot.title}</span>
-                        {snapshot.subtitle ? <span className="inspect-phone-navsub">{snapshot.subtitle}</span> : null}
+                ) : (
+                    <div className="inspect-phone-screen">
+                        <div className="inspect-phone-statusbar">
+                            <span>{clockNow()}</span>
+                            <span style={statusIconsStyle}>●●● ▮</span>
+                        </div>
+                        <div className="inspect-phone-navbar">
+                            <span className="inspect-phone-back" />
+                            <span className="inspect-phone-navtitle">{snapshot.title}</span>
+                            {snapshot.subtitle ? <span className="inspect-phone-navsub">{snapshot.subtitle}</span> : null}
+                        </div>
+                        <div className="inspect-phone-content">
+                            <ScreenBody snapshot={snapshot} />
+                        </div>
+                        <div className="inspect-phone-homebar" />
                     </div>
-                    <div className="inspect-phone-content">
-                        <ScreenBody snapshot={snapshot} />
-                    </div>
-                    <div className="inspect-phone-homebar" />
-                </div>
+                )}
             </div>
 
             <div className="inspect-live-callout">
