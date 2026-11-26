@@ -5,6 +5,13 @@ import { ChevronLeft, LoaderCircle, LogOut, QrCode, RefreshCw, Search, Sparkles,
 
 import { useMusicControls } from "@/lib/music-context";
 import type { MusicTrack } from "@/lib/music-storage";
+import { QqBackendPanel } from "./qq-backend-panel";
+import {
+  backendSearch,
+  backendSongToTrack,
+  backendSongUrl,
+  loadQqBackendConfig,
+} from "@/lib/music-qq-backend";
 import {
   SODA_MOODS,
   checkQqQrSession,
@@ -22,7 +29,7 @@ import {
   type QqSong,
 } from "@/lib/music-qq";
 
-type HubTab = "qq" | "soda";
+type HubTab = "qq" | "backend" | "soda";
 
 type Props = {
   onClose: () => void;
@@ -175,6 +182,24 @@ export function MusicSourceHub({ onClose, onToast }: Props) {
     if (busyId) return;
     setBusyId(song.songmid);
     showNotice(`正在准备播放：${song.name}`);
+
+    // 配了 QQ 后端就优先走真实音源，拿不到再退回三级兜底
+    const backend = loadQqBackendConfig();
+    if (backend) {
+      try {
+        const hits = await backendSearch(backend, `${song.name} ${song.singer}`.trim(), 5);
+        const hit = hits.find(item => item.title.includes(song.name) || song.name.includes(item.title)) || hits[0];
+        if (hit) {
+          const { url } = await backendSongUrl(backend, hit);
+          player.playUrl(url, backendSongToTrack(hit));
+          setBusyId(null);
+          return;
+        }
+      } catch {
+        // 后端异常时静默回落到公开接口
+      }
+    }
+
     const source = await resolveQqPlaySource(song);
     setBusyId(null);
     if (!source.url) {
@@ -288,10 +313,13 @@ export function MusicSourceHub({ onClose, onToast }: Props) {
 
       <div className="msh-tabs">
         <button type="button" data-active={tab === "qq" ? "1" : undefined} onClick={() => setTab("qq")}>QQ音乐</button>
+        <button type="button" data-active={tab === "backend" ? "1" : undefined} onClick={() => setTab("backend")}>我的QQ</button>
         <button type="button" data-active={tab === "soda" ? "1" : undefined} onClick={() => setTab("soda")}>汽水音乐</button>
       </div>
 
-      {tab === "qq" ? (
+      {tab === "backend" ? (
+        <QqBackendPanel onToast={showNotice} />
+      ) : tab === "qq" ? (
         <div className="msh-body">
           <form
             className="msh-search"
@@ -350,7 +378,7 @@ export function MusicSourceHub({ onClose, onToast }: Props) {
             </>
           ) : null}
 
-          <p className="msh-note">曲库来自 QQ 音乐网页端公开接口；播放会依次尝试 QQ 音源、网易云同名歌曲、iTunes 试听。</p>
+          <p className="msh-note">曲库来自 QQ 音乐网页端公开接口；在「我的QQ」里配好后端后，这里播放会优先用你账号的真实音源，否则依次尝试 QQ 音源、网易云同名歌曲、iTunes 试听。</p>
         </div>
       ) : (
         <div className="msh-body msh-body--soda">

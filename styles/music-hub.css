@@ -495,3 +495,286 @@
   line-height: 1.6;
   color: rgba(236, 239, 243, .4);
 }
+
+/* ── 我的 QQ 后端连接 ───────────────────────────────────── */
+.qb-setup {
+  margin-top: 8px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, .09);
+  background: linear-gradient(170deg, #1b1d23, #13151a);
+}
+
+.qb-setup-head {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  color: #e8cf8c;
+}
+
+.qb-setup-head strong {
+  display: block;
+  color: #f1f4f8;
+  font-size: calc(13.5px * var(--app-text-scale, 1));
+}
+
+.qb-setup-head small {
+  display: block;
+  margin-top: 3px;
+  font-size: calc(9.5px * var(--app-text-scale, 1));
+  color: rgba(236, 239, 243, .5);
+  line-height: 1.5;
+}
+
+.qb-setup-desc {
+  margin: 12px 0 14px;
+  font-size: calc(10.5px * var(--app-text-scale, 1));
+  line-height: 1.75;
+  color: rgba(236, 239, 243, .6);
+}
+
+.qb-setup-desc code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, .08);
+  font-size: 9.5px;
+  color: #e8cf8c;
+}
+
+.qb-field {
+  display: block;
+  margin-bottom: 10px;
+}
+
+.qb-field > span {
+  display: block;
+  margin-bottom: 5px;
+  font-size: calc(10px * var(--app-text-scale, 1));
+  color: rgba(236, 239, 243, .55);
+}
+
+.qb-field > input {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, .12);
+  border-radius: 12px;
+  outline: none;
+  color: #eef1f5;
+  background: rgba(255, 255, 255, .04);
+  font-size: calc(11.5px * var(--app-text-scale, 1));
+}
+
+.qb-field > input::placeholder { color: rgba(236, 239, 243, .3); }
+
+.qb-error {
+  margin: 2px 0 10px;
+  font-size: calc(10px * var(--app-text-scale, 1));
+  line-height: 1.6;
+  color: #ff9b9b;
+}
+
+.qb-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 42px;
+  border: 0;
+  border-radius: 13px;
+  color: #0d0f12;
+  background: linear-gradient(135deg, #f4e08a, #d9b96a);
+  font-size: calc(12.5px * var(--app-text-scale, 1));
+  font-weight: 800;
+  box-shadow: 0 10px 24px rgba(217, 185, 106, .22);
+}
+
+.qb-primary:disabled { opacity: .6; }
+
+.qb-primary--sm {
+  width: auto;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: calc(11px * var(--app-text-scale, 1));
+}
+
+.qb-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: 4px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .05);
+  border: 1px solid rgba(255, 255, 255, .07);
+}
+
+.qb-status-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #c9a15c;
+  box-shadow: 0 0 0 3px rgba(201, 161, 92, .18);
+}
+
+.qb-status-dot[data-on="1"] {
+  background: #5fbf8b;
+  box-shadow: 0 0 0 3px rgba(95, 191, 139, .18);
+}
+
+.qb-status-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.qb-status-main strong {
+  font-size: calc(11.5px * var(--app-text-scale, 1));
+}
+
+.qb-status-main small {
+  font-size: calc(9px * var(--app-text-scale, 1));
+  color: rgba(236, 239, 243, .42);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qb-mini {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  color: rgba(236, 239, 243, .7);
+  background: rgba(255, 255, 255, .04);
+}
+
+.qb-login {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-top: 10px;
+  padding: 13px;
+  border-radius: 16px;
+  background: linear-gradient(160deg, rgba(232, 207, 140, .1), rgba(255, 255, 255, .02));
+  border: 1px solid rgba(232, 207, 140, .18);
+}
+
+.qb-qr {
+  flex: none;
+  width: 104px;
+  height: 104px;
+  border-radius: 12px;
+  object-fit: contain;
+  background: #fff;
+  padding: 4px;
+}
+
+.qb-qr--empty {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: #6b6f76;
+  background: rgba(255, 255, 255, .06);
+}
+
+.qb-login-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.qb-login-copy strong {
+  display: block;
+  font-size: calc(12px * var(--app-text-scale, 1));
+}
+
+.qb-login-copy p {
+  margin: 5px 0 9px;
+  font-size: calc(10px * var(--app-text-scale, 1));
+  line-height: 1.55;
+  color: rgba(236, 239, 243, .55);
+}
+
+.qb-playlists {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.qb-playlist {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 6px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #eef1f5;
+  text-align: left;
+}
+
+.qb-playlist[data-active="1"] { background: rgba(255, 255, 255, .07); }
+
+.qb-playlist-cover {
+  flex: none;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .08);
+  background-size: cover;
+  background-position: center;
+}
+
+.qb-playlist-copy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.qb-playlist-copy strong {
+  font-size: calc(11.5px * var(--app-text-scale, 1));
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qb-playlist-copy small {
+  font-size: calc(9px * var(--app-text-scale, 1));
+  color: rgba(236, 239, 243, .45);
+}
+
+.qb-vip {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-style: normal;
+  font-size: calc(8px * var(--app-text-scale, 1));
+  font-weight: 800;
+  color: #1a1509;
+  background: #d9b96a;
+  vertical-align: middle;
+}
+
+.qb-more {
+  width: 100%;
+  height: 36px;
+  margin-top: 8px;
+  border: 1px dashed rgba(255, 255, 255, .16);
+  border-radius: 12px;
+  color: rgba(236, 239, 243, .7);
+  background: transparent;
+  font-size: calc(11px * var(--app-text-scale, 1));
+}
