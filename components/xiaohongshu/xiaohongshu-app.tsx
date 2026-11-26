@@ -11,6 +11,7 @@ import {
   Heart,
   Home,
   ImagePlus,
+  Link2,
   Loader2,
   MapPin,
   MessageCircle,
@@ -26,6 +27,7 @@ import {
 } from "lucide-react";
 
 import { getChatImageFromIndexedDB, saveChatImageToIndexedDB } from "@/lib/chat-asset-storage";
+import { LinkParseSheet } from "@/components/xiaohongshu/link-parse-sheet";
 import { loadCharacters } from "@/lib/character-storage";
 import type { Character } from "@/lib/character-types";
 import { incrementEventCounter } from "@/lib/memory-storage";
@@ -738,6 +740,7 @@ export function XiaohongshuApp({ onClose, onNotice, visible = true, onIdle, onBu
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [busy, setBusy] = useState<BusyState>("idle");
   const [error, setError] = useState("");
+  const [showLinkParse, setShowLinkParse] = useState(false);
   const [debugErrorTitle, setDebugErrorTitle] = useState("暂时无法完成小红书操作。");
   const [debugRawOutput, setDebugRawOutput] = useState("");
   const [debugParseError, setDebugParseError] = useState("");
@@ -2516,6 +2519,14 @@ export function XiaohongshuApp({ onClose, onNotice, visible = true, onIdle, onBu
             <button
               type="button"
               className="cp-float-refresh xhs-icon-action xhs-icon-action--refresh"
+              onClick={() => setShowLinkParse(true)}
+              aria-label="解析分享链接"
+            >
+              <Link2 size={17} strokeWidth={1.8} />
+            </button>
+            <button
+              type="button"
+              className="cp-float-refresh xhs-icon-action xhs-icon-action--refresh"
               onClick={() => requestFeedAction("refresh")}
               disabled={busy !== "idle"}
               aria-label="刷新小红书内容"
@@ -3499,6 +3510,12 @@ export function XiaohongshuApp({ onClose, onNotice, visible = true, onIdle, onBu
           </section>
         </div>
       ) : null}
+
+      <LinkParseSheet
+        open={showLinkParse}
+        onClose={() => setShowLinkParse(false)}
+        onNotice={onNotice}
+      />
     </section>
   );
 }
