@@ -1785,6 +1785,13 @@
 }
 
 /* 剧情拍照弹窗 */
+.story-photo-open-btn {
+  /* 与「续写」共用绝对定位样式，这里单独放到输入栏右上角，避免两个按钮重叠 */
+  left: auto;
+  right: 12px;
+  top: -30px;
+  z-index: 2;
+}
 .story-photo-overlay {
   position: fixed;
   inset: 0;
