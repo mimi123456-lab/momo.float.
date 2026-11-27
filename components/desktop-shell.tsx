@@ -4766,7 +4766,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
                   </>
                 ) : (
                   <>
-                    <section className="phone-app-pane" style={activeApp === "dwelling" || activeApp === "xiaohongshu" || activeApp === "shopping" ? { display: "none" } : undefined}>
+                    <section className="phone-app-pane" style={activeApp === "dwelling" || activeApp === "xiaohongshu" || activeApp === "shopping" || activeApp === "watchtogether" ? { display: "none" } : undefined}>
                       {renderAppBody()}
                     </section>
                     {/* DwellingApp stays mounted while generating — auto-unmounts when idle */}
