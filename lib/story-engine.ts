@@ -5,6 +5,7 @@ import {
   loadPresets,
   loadRegexes,
   loadWorldBooks,
+  loadImageGenerationSettings,
   resolveBinding,
   resolveUserIdentity,
 } from "./settings-storage";
@@ -23,6 +24,7 @@ import { loadStoryMessages, replaceStoryMessages, resolveActiveStorySchemes, typ
 import type { ChatMessage } from "./chat-storage";
 import { loadChatSessions } from "./chat-storage";
 import { buildOfflineStoryDigest } from "./chat-offline-storage";
+import { STORY_PHOTO_DIRECTIVE } from "./story-photo-trigger";
 import { MacroEngine } from "./macro-engine";
 import { formatCharacterRelationsForPrompt } from "./character-world-storage";
 import { formatPromptTimestamp } from "./prompt-time";
@@ -470,6 +472,10 @@ async function buildStoryPromptMessages(
     }
   }
   messages.push({ role: "system", content: buildStoryBodyFormatPrompt(settings) });
+  // 生图已配置时，允许角色在剧情里主动拍照；标记由 story-app-base 解析后插入照片消息。
+  if (!independent && loadImageGenerationSettings().enabled) {
+    messages.push({ role: "system", content: STORY_PHOTO_DIRECTIVE });
+  }
   return messages;
 }
 

@@ -1761,3 +1761,25 @@
           .story-branch-memory { padding:6px 5px; font-size:calc(7.5px*var(--app-text-scale,1)); }
           .story-group-picker { grid-template-columns:1fr; }
         }
+
+/* 角色主动拍照：剧情对话里的照片卡片 */
+.story-photo-card {
+  margin: 10px 0;
+  padding: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: color-mix(in srgb, currentColor 6%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+}
+.story-photo-card img {
+  display: block;
+  width: 100%;
+  max-height: 62vh;
+  object-fit: cover;
+}
+.story-photo-card figcaption {
+  padding: 7px 10px;
+  font-size: 11px;
+  line-height: 1.45;
+  opacity: 0.72;
+}

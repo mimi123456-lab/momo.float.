@@ -57,6 +57,7 @@ import { StoryHtmlRenderer, type StoryVoiceSegment } from "@/components/ui/story
 import { StorySettingsPage, STORY_DEFAULT_STATUS_RENDER, STORY_DEFAULT_THEATER_RENDER } from "@/components/story/story-settings-page";
 import { loadCharacters } from "@/lib/character-storage";
 import { recordStorySyncEvent, backfillStorySync } from "@/lib/story-chat-sync";
+import { extractStoryPhotoRequest, generateStoryPhotoMessage } from "@/lib/story-photo-trigger";
 import { maybeRunSummarization, runSummarizationPipeline } from "@/lib/memory-summarizer";
 import { incrementEventCounter } from "@/lib/memory-storage";
 import { loadBindingConfig, loadPresets, resolveBinding, resolveUserIdentity } from "@/lib/settings-storage";
@@ -1703,12 +1704,15 @@ export function StoryApp({ onClose }: StoryAppProps) {
         signal: generationRun.controller.signal,
       });
       if (!isCurrentGeneration()) return;
+      // 她主动拍照：正文里带 【拍照】…【/拍照】 时，把标记从正文剔除，
+      // 再异步生成照片插入对话，下一轮剧情就能看到“刚拍的照片是什么”。
+      const photoTrigger = extractStoryPhotoRequest(result.rawText);
       const assistantMessage = pushStoryMessage({
         sessionId,
         role: "assistant",
-        rawContent: result.rawText,
-        renderedContent: result.renderedText,
-        storySummary: result.storySummary,
+        rawContent: photoTrigger.text || result.rawText,
+        renderedContent: extractStoryPhotoRequest(result.renderedText).text,
+        storySummary: extractStoryPhotoRequest(result.storySummary || "").text,
         regexSignature: result.regexSignature,
         parserVersion: result.parserVersion,
       });
@@ -1717,7 +1721,19 @@ export function StoryApp({ onClose }: StoryAppProps) {
       }
       setStorageVersion((value) => value + 1);
       // 共享记忆：一条剧情正文压成一条事件，聊天室线上/线下立即读取
-      recordStorySyncEvent(characterId, "assistant", result.renderedText || result.rawText || result.storySummary || "");
+      recordStorySyncEvent(characterId, "assistant", photoTrigger.text || result.rawText || result.storySummary || "");
+      if (photoTrigger.description) {
+        void generateStoryPhotoMessage({
+          sessionId,
+          characterId,
+          description: photoTrigger.description,
+          signal: generationRun.controller.signal,
+        }).then((photoMessage) => {
+          if (!photoMessage) return;
+          if (activeSessionIdRef.current === sessionId) setMessages(loadStoryMessages(sessionId));
+          recordStorySyncEvent(characterId, "assistant", `（她拍了张照片：${photoTrigger.description}）`);
+        }).catch(() => undefined);
+      }
 
       const memoryCharacterIds = currentSession?.participantIds?.length ? currentSession.participantIds : [characterId];
       const storyCharacters = memoryCharacterIds
