@@ -1,7 +1,8 @@
 "use client";
 
 import { forwardRef, Fragment, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChatSession, ChatMessage, CHAT_APP_SETTINGS_UPDATED_EVENT, CHAT_INITIAL_VISIBLE_MESSAGE_COUNT, CHAT_LOAD_MORE_MESSAGE_COUNT, CHAT_REQUEST_REPLY_EVENT, loadChatAppSettings, loadChatMessages, loadChatContacts, loadChatSessions, saveChatSessions, pushChatMessage, updateChatMessage, deleteChatMessage, deleteChatMessagesFrom, deleteChatMessagesByIds, retractChatMessage, editChatMessage, updateMessageMediaData, replaceResponseBatchWithParts, replaceGroupResponseRound, isReadingDiscussMessage, isSystemInstructionMessage, getSystemInstructionDisplayContent, createResponseBatchId, createResponseRoundId, getLatestStateValues, getLatestCharacterStateValues, compareChatMessages, isSessionStreamingEnabled, resolveChatBackgroundImage, resolveChatCharacterAvatar, resolveChatUserAvatar } from "@/lib/chat-storage";
+import { ChatSession, ChatMessage, CHAT_APP_SETTINGS_UPDATED_EVENT, CHAT_INITIAL_VISIBLE_MESSAGE_COUNT, CHAT_LOAD_MORE_MESSAGE_COUNT, CHAT_REQUEST_REPLY_EVENT, loadChatAppSettings, loadChatMessages, loadChatContacts, loadChatSessions, saveChatSessions, pushChatMessage, updateChatMessage, deleteChatMessage, deleteChatMessagesFrom, deleteChatMessagesByIds, retractChatMessage, editChatMessage, updateMessageMediaData, replaceResponseBatchWithParts, replaceGroupResponseRound, isReadingDiscussMessage, isSystemInstructionMessage, getSystemInstructionDisplayContent, createResponseBatchId, createResponseRoundId, getLatestStateValues, getLatestCharacterStateValues, compareChatMessages, isSessionStreamingEnabled, resolveChatBackgroundImage, resolveChatCharacterAvatar, resolveChatUserAvatar, createOrGetSession } from "@/lib/chat-storage";
+import { parseSharedLink } from "@/lib/link-parser";
 import { cleanStreamText, splitStreamPreviewSegments, stripLiteralTexts, stripXmlTagBlocks } from "@/lib/stream-preview";
 import type { StateValue } from "@/lib/chat-storage";
 import { parseStateValues, mergeStateValues } from "@/lib/state-value-parser";
@@ -680,6 +681,20 @@ function normalizeCustomPanelHeight(value: unknown): string | undefined {
     return undefined;
 }
 
+const SHARE_LINK_PATTERN = /https?:\/\/[^\s<>"']*(?:xiaohongshu\.com|xhslink\.com|xhslink\.cn|douyin\.com|iesdouyin\.com|bilibili\.com|b23\.tv)[^\s<>"']*/i;
+
+function extractShareLink(text: string): string {
+    const match = SHARE_LINK_PATTERN.exec(text || "");
+    return match?.[0]?.replace(/[)\]},，。！？、；;,.!?]+$/u, "") || "";
+}
+
+function shareLinkLabel(link: string): string {
+    if (/xiaohongshu\.com|xhslink\.com|xhslink\.cn/i.test(link)) return "小红书";
+    if (/douyin\.com|iesdouyin\.com/i.test(link)) return "抖音";
+    if (/bilibili\.com|b23\.tv/i.test(link)) return "哔哩哔哩";
+    return "网页";
+}
+
 const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     characterName: string;
     characterId: string;
@@ -746,6 +761,10 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
     onSendSticker,
 }, ref) {
     const [inputText, setInputText] = useState("");
+    // 粘贴/输入分享链接后，先给一条「解析并发送」确认，避免误发或把裸链接当普通文字。
+    const [pendingShareLink, setPendingShareLink] = useState("");
+    const [shareBusy, setShareBusy] = useState(false);
+    const [shareError, setShareError] = useState("");
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     // 表情包搜索联想：ESC/失焦置 true 隐藏，输入变化重新开启
     const [suggestClosed, setSuggestClosed] = useState(false);
@@ -782,6 +801,42 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
         },
     }), [appendText]);
 
+    /** 把粘贴的分享链接解析成卡片发给角色，并立即触发她的回复。 */
+    const sendSharedLink = async (link: string) => {
+        if (!link || shareBusy) return;
+        setShareBusy(true);
+        setShareError("");
+        try {
+            const parsed = await parseSharedLink(link);
+            const label = shareLinkLabel(link);
+            const platform = parsed.platform === "unknown" ? "web" : parsed.platform;
+            const desc = [parsed.desc, parsed.author ? `作者：${parsed.author}` : ""].filter(Boolean).join("\n").slice(0, 800);
+            const session = createOrGetSession(characterId);
+            pushChatMessage({
+                sessionId: session.id,
+                role: "user",
+                content: `[分享了一条${label}内容:${parsed.title || "无标题"}] ${desc}`.trim(),
+                mediaType: "link_share",
+                mediaData: {
+                    linkPlatform: platform,
+                    linkTitle: parsed.title || `${label}内容`,
+                    linkDesc: desc,
+                    linkCover: parsed.images[0] || parsed.video || "",
+                    linkUrl: parsed.sourceUrl || link,
+                },
+            });
+            window.dispatchEvent(new CustomEvent("chat-messages-updated", { detail: { sessionId: session.id } }));
+            window.dispatchEvent(new CustomEvent(CHAT_REQUEST_REPLY_EVENT, { detail: { sessionId: session.id } }));
+            setInputText(previous => previous.replace(link, "").trim());
+            setPendingShareLink("");
+            onClosePanels();
+        } catch (error) {
+            setShareError(error instanceof Error ? error.message : "解析失败，请换用小红书 App 内的解析入口");
+        } finally {
+            setShareBusy(false);
+        }
+    };
+
     const handleSubmit = () => {
         if (inputLocked) return;
         if (isGenerating) {
@@ -790,6 +845,11 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
         }
         const trimmed = inputText.trim();
         if (!trimmed) return;
+        const shareLink = !isGroup ? (pendingShareLink || extractShareLink(trimmed)) : "";
+        if (shareLink) {
+            void sendSharedLink(shareLink);
+            return;
+        }
         if (!onSendText(trimmed)) return;
         setInputText("");
         resetTextareaHeight();
@@ -865,13 +925,41 @@ const ChatTextInputBar = memo(forwardRef<ChatTextInputHandle, {
                     onClose={() => setSuggestClosed(true)}
                 />
             )}
+            {pendingShareLink && !inputLocked && (
+                <div className="chat-link-detect-bar">
+                    <span className="chat-link-detect-text">检测到{shareLinkLabel(pendingShareLink)}链接</span>
+                    <button
+                        type="button"
+                        className="chat-link-detect-send"
+                        onClick={() => { void sendSharedLink(pendingShareLink); }}
+                        disabled={shareBusy}
+                    >
+                        {shareBusy ? "解析中…" : "解析并发送"}
+                    </button>
+                    <button
+                        type="button"
+                        className="chat-link-detect-cancel"
+                        onClick={() => { setPendingShareLink(""); setShareError(""); }}
+                        disabled={shareBusy}
+                    >
+                        取消
+                    </button>
+                </div>
+            )}
+            {shareError ? <div className="chat-link-detect-error">{shareError}</div> : null}
             <textarea
                 ref={textareaRef}
                 rows={1}
                 value={inputText}
                 onChange={e => {
-                    setInputText(e.target.value);
+                    const nextValue = e.target.value;
+                    setInputText(nextValue);
                     setSuggestClosed(false);
+                    if (!isGroup) {
+                        const link = extractShareLink(nextValue);
+                        setPendingShareLink(link);
+                        if (!link) setShareError("");
+                    }
                     e.target.style.height = "auto";
                     e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
                 }}

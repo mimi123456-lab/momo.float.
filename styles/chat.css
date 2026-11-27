@@ -658,6 +658,54 @@
   background: color-mix(in srgb, var(--c-card) 60%, transparent);
 }
 
+/* 输入框粘贴分享链接后的确认条 */
+.chat-link-detect-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  border: 0.5px solid var(--c-input-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--c-card) 85%, transparent);
+  font-size: 11px;
+  color: var(--c-text);
+}
+.chat-link-detect-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-link-detect-send {
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border-radius: 8px;
+  background: var(--c-primary, #6b8afd);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+}
+.chat-link-detect-cancel {
+  flex: 0 0 auto;
+  padding: 4px 6px;
+  background: transparent;
+  color: var(--c-icon);
+  font-size: 11px;
+}
+.chat-link-detect-send:disabled,
+.chat-link-detect-cancel:disabled { opacity: 0.5; }
+.chat-link-detect-error {
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(209, 67, 67, 0.12);
+  color: #b42318;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .chat-theater-mode-strip {
   position: relative;
   display: grid;
