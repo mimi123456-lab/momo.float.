@@ -55,9 +55,10 @@ import { isStoryReadingPanelVisible, storyStageAppearanceClass, storyChromeAttri
 import { Avatar } from "@/components/ui/primitives";
 import { StoryHtmlRenderer, type StoryVoiceSegment } from "@/components/ui/story-html-renderer";
 import { StorySettingsPage, STORY_DEFAULT_STATUS_RENDER, STORY_DEFAULT_THEATER_RENDER } from "@/components/story/story-settings-page";
+import { StoryPhotoDialog } from "@/components/story/story-photo-dialog";
 import { loadCharacters } from "@/lib/character-storage";
 import { recordStorySyncEvent, backfillStorySync } from "@/lib/story-chat-sync";
-import { extractStoryPhotoRequest, generateStoryPhotoMessage } from "@/lib/story-photo-trigger";
+import { extractStoryPhotoRequest, pushStoryPhotoMessage, storyPhotoMemoryText } from "@/lib/story-photo-trigger";
 import { maybeRunSummarization, runSummarizationPipeline } from "@/lib/memory-summarizer";
 import { incrementEventCounter } from "@/lib/memory-storage";
 import { loadBindingConfig, loadPresets, resolveBinding, resolveUserIdentity } from "@/lib/settings-storage";
@@ -318,6 +319,7 @@ const StoryComposer = memo(function StoryComposer({
   voiceProgress,
   onSend,
   onContinue,
+  onOpenStoryPhoto,
   autoReadingEnabled,
   autoReading,
   currentReadExpanded,
@@ -339,6 +341,7 @@ const StoryComposer = memo(function StoryComposer({
   voiceProgress: { current: number; total: number };
   onSend: (text: string) => void;
   onContinue: () => void;
+  onOpenStoryPhoto: () => void;
   autoReadingEnabled: boolean;
   autoReading: boolean;
   currentReadExpanded: boolean;
@@ -448,6 +451,17 @@ const StoryComposer = memo(function StoryComposer({
         {voiceProgress.total > 0 ? (
           <small>{voiceProgress.current}/{voiceProgress.total}</small>
         ) : null}
+      </button>
+      <button
+        type="button"
+        className="story-continue-btn story-photo-open-btn"
+        data-story-action="photo"
+        onClick={onOpenStoryPhoto}
+        disabled={isGenerating}
+        aria-label="剧情拍照"
+        title="剧情拍照（她 / 我 / 合照）"
+      >
+        拍照
       </button>
       <button
         type="button"
@@ -561,6 +575,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
   const [messages, setMessages] = useState<StoryMessage[]>([]);
   const [visibleMessageCount, setVisibleMessageCount] = useState(STORY_INITIAL_LOAD);
   const [composerAppendRequest, setComposerAppendRequest] = useState<StoryComposerAppendRequest | null>(null);
+  const [storyPhotoOpen, setStoryPhotoOpen] = useState(false);
   const [foldTagsDraft, setFoldTagsDraft] = useState("");
   const [contextExcludedTagsDraft, setContextExcludedTagsDraft] = useState("");
   // 生成状态按会话记录：避免在 A 会话生成时切到 B 会话也显示"正在生成"
@@ -1723,7 +1738,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
       // 共享记忆：一条剧情正文压成一条事件，聊天室线上/线下立即读取
       recordStorySyncEvent(characterId, "assistant", photoTrigger.text || result.rawText || result.storySummary || "");
       if (photoTrigger.description) {
-        void generateStoryPhotoMessage({
+        void pushStoryPhotoMessage({
           sessionId,
           characterId,
           description: photoTrigger.description,
@@ -1731,7 +1746,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
         }).then((photoMessage) => {
           if (!photoMessage) return;
           if (activeSessionIdRef.current === sessionId) setMessages(loadStoryMessages(sessionId));
-          recordStorySyncEvent(characterId, "assistant", `（她拍了张照片：${photoTrigger.description}）`);
+          recordStorySyncEvent(characterId, "assistant", storyPhotoMemoryText(photoTrigger.description));
         }).catch(() => undefined);
       }
 
@@ -2707,6 +2722,7 @@ export function StoryApp({ onClose }: StoryAppProps) {
         voiceProgress={voiceSequenceProgress}
         onSend={(text) => { void handleSend(text); }}
         onContinue={() => { void handleSend("继续"); }}
+        onOpenStoryPhoto={() => setStoryPhotoOpen(true)}
         autoReadingEnabled={Boolean(uiPrefs.autoReadingEnabled)}
         autoReading={autoReading}
         currentReadExpanded={currentReadExpanded}
@@ -2725,6 +2741,17 @@ export function StoryApp({ onClose }: StoryAppProps) {
         quickInputOptions={quickInputOptions}
         quickInputCursor={quickInputCursor}
       />}
+
+      {storyPhotoOpen && activeSessionId && activeCharacterId ? (
+        <StoryPhotoDialog
+          sessionId={activeSessionId}
+          characterId={activeCharacterId}
+          characterName={storyDisplayName}
+          messages={messages}
+          onClose={() => setStoryPhotoOpen(false)}
+          onGenerated={() => setMessages(loadStoryMessages(activeSessionId))}
+        />
+      ) : null}
 
       {storySettings.floatingPhoneEnabled ? (
         <button className="story-floating-phone-ball" type="button" onClick={() => { setFloatingChatVersion((value) => value + 1); setFloatingPhoneTab("chat"); setFloatingPlusOpen(false); setFloatingPhoneOpen(true); }} aria-label="打开悬浮小手机"><MiniPhoneIcon size={18} /></button>

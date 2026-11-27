@@ -3,7 +3,7 @@
 // 我们再负责出图、把照片作为一条消息放进对话，并让下一轮剧情/聊天室知道照片内容。
 
 import { generateImageFromConfiguredApi } from "./image-generation-service";
-import { pushStoryMessage, type StoryMessage } from "./story-storage";
+import { loadStoryMessages, pushStoryMessage, replaceStoryMessages, type StoryMessage } from "./story-storage";
 
 /** 放进剧情提示词里的指令；只在生图已配置时注入。 */
 export const STORY_PHOTO_DIRECTIVE = [
@@ -57,16 +57,14 @@ function escapeHtml(value: string): string {
 }
 
 /**
- * 生成一张剧情照片并作为系统样式消息插入当前剧情会话。
- * - rawContent 很短（“她拍了张照片：描述”），会进入后续剧情提示词；
- * - renderedContent 是图片卡片，只在界面上展示，不进提示词。
+ * 只负责出图：返回 dataUrl，便于手动拍照/长按重生成复用。
+ * 生图未配置或失败时返回 null。
  */
-export async function generateStoryPhotoMessage(params: {
-    sessionId: string;
+export async function generateStoryPhotoData(params: {
     characterId: string;
     description: string;
     signal?: AbortSignal;
-}): Promise<StoryMessage | null> {
+}): Promise<{ dataUrl: string; description: string } | null> {
     const description = params.description.trim();
     if (!description) return null;
     const references = resolveStoryPhotoReferences(description);
@@ -79,18 +77,68 @@ export async function generateStoryPhotoMessage(params: {
         signal: params.signal,
     });
     if (!generated) return null;
+    return { dataUrl: generated.dataUrl, description };
+}
 
-    const caption = "她拍了张照片";
-    const html = [
+/** 照片卡片 HTML：只在界面展示，不进提示词。 */
+export function buildStoryPhotoHtml(description: string, dataUrl: string): string {
+    return [
         '<figure class="story-photo-card">',
-        `<img src="${generated.dataUrl}" alt="${escapeHtml(description.slice(0, 80))}" loading="lazy" />`,
-        `<figcaption>${escapeHtml(caption)} · ${escapeHtml(description.slice(0, 120))}</figcaption>`,
+        `<img src="${dataUrl}" alt="${escapeHtml(description.slice(0, 80))}" loading="lazy" />`,
+        `<figcaption>${escapeHtml("她拍了张照片")} · ${escapeHtml(description.slice(0, 120))}</figcaption>`,
         "</figure>",
     ].join("");
+}
+
+/** 照片消息的短正文：会进入后续剧情提示词，让她记得照片内容。 */
+export function storyPhotoMemoryText(description: string): string {
+    return `（她拍了张照片：${description}）`;
+}
+
+/**
+ * 生成一张剧情照片并作为系统样式消息插入当前剧情会话。
+ * - rawContent 很短（“她拍了张照片：描述”），会进入后续剧情提示词；
+ * - renderedContent 是图片卡片，只在界面上展示，不进提示词。
+ */
+export async function pushStoryPhotoMessage(params: {
+    sessionId: string;
+    characterId: string;
+    description: string;
+    signal?: AbortSignal;
+}): Promise<StoryMessage | null> {
+    const generated = await generateStoryPhotoData({
+        characterId: params.characterId,
+        description: params.description,
+        signal: params.signal,
+    });
+    if (!generated) return null;
     return pushStoryMessage({
         sessionId: params.sessionId,
         role: "system",
-        rawContent: `（她拍了张照片：${description}）`,
-        renderedContent: html,
+        contextRole: "assistant",
+        rawContent: storyPhotoMemoryText(generated.description),
+        renderedContent: buildStoryPhotoHtml(generated.description, generated.dataUrl),
     });
+}
+
+/** 长按重生成：替换已有照片消息的图片与描述。 */
+export function replaceStoryPhotoMessage(params: {
+    sessionId: string;
+    messageId: string;
+    description: string;
+    dataUrl: string;
+}): boolean {
+    const messages = loadStoryMessages(params.sessionId);
+    let changed = false;
+    const next = messages.map(message => {
+        if (message.id !== params.messageId) return message;
+        changed = true;
+        return {
+            ...message,
+            rawContent: storyPhotoMemoryText(params.description),
+            renderedContent: buildStoryPhotoHtml(params.description, params.dataUrl),
+        };
+    });
+    if (changed) replaceStoryMessages(params.sessionId, next);
+    return changed;
 }
