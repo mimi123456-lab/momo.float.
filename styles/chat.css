@@ -7286,3 +7286,99 @@
   background: currentColor;
   animation: chat-stream-cursor-blink 1s steps(2, start) infinite;
 }
+
+/* ── 聊天设置：剧情进度 / 语音语气档案 文本域 ── */
+.chat-settings-textarea {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 14%, transparent);
+  background: color-mix(in srgb, var(--c-text) 4%, transparent);
+  color: var(--c-text);
+  font-size: 13px;
+  line-height: 1.5;
+  outline: none;
+}
+.chat-settings-textarea:focus {
+  border-color: color-mix(in srgb, var(--c-accent, #6b8afd) 55%, transparent);
+}
+
+/* ── 剧情拍照 ── */
+.chat-story-photo-dialog {
+  max-width: 560px;
+  width: min(94vw, 560px);
+}
+.chat-story-photo-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.chat-story-photo-tab {
+  flex: 1;
+  padding: 7px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c-text) 14%, transparent);
+  background: transparent;
+  color: var(--c-text);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.chat-story-photo-tab[data-active] {
+  background: color-mix(in srgb, var(--c-accent, #6b8afd) 16%, transparent);
+  border-color: color-mix(in srgb, var(--c-accent, #6b8afd) 45%, transparent);
+  font-weight: 600;
+}
+.chat-story-photo-context {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 108px;
+  overflow: auto;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--c-text) 5%, transparent);
+  font-size: 12px;
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--c-text) 78%, transparent);
+}
+.chat-story-photo-context strong {
+  font-size: 11px;
+  opacity: 0.72;
+}
+.chat-story-photo-prompt {
+  width: 100%;
+}
+.chat-story-photo-actions {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+.chat-story-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+.chat-story-photo-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--c-text);
+  font-size: 11px;
+  text-align: left;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+.chat-story-photo-item img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--c-text) 8%, transparent);
+}

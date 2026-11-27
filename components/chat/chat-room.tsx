@@ -40,6 +40,7 @@ import { CustomAppRunner } from "@/components/app-market/custom-app-runner";
 import { CustomAppForegroundBoundary } from "@/components/app-market/custom-app-failure";
 
 import { ChatSettingsPanel } from "./chat-settings-panel";
+import { StoryPhotoDialog } from "./story-photo-dialog";
 import { VoiceCallScreen } from "./voice-call-screen";
 import { VideoCallScreen } from "./video-call-screen";
 import { GroupCallScreen } from "./group-call-screen";
@@ -1014,6 +1015,7 @@ const OfflineTextInputBar = memo(forwardRef<OfflineTextInputHandle, {
     onToggleEmojiPanel: () => void;
     onSendText: (text: string) => boolean;
     onStopGeneration: () => void;
+    onOpenStoryPhoto: () => void;
 }>(function OfflineTextInputBar({
     isOfflineGenerating,
     isSpectator,
@@ -1024,6 +1026,7 @@ const OfflineTextInputBar = memo(forwardRef<OfflineTextInputHandle, {
     onToggleEmojiPanel,
     onSendText,
     onStopGeneration,
+    onOpenStoryPhoto,
 }, ref) {
     const [inputText, setInputText] = useState("");
     const inputTextRef = useRef("");
@@ -1129,6 +1132,20 @@ const OfflineTextInputBar = memo(forwardRef<OfflineTextInputHandle, {
                     </svg>
                 </button>
                 <button
+                    type="button"
+                    onClick={onOpenStoryPhoto}
+                    disabled={isSpectator}
+                    className="ui-bare-btn text-[var(--c-text)]"
+                    style={isSpectator ? { opacity: 0.35 } : undefined}
+                    aria-label="剧情拍照"
+                    title="剧情拍照（她 / 我 / 合照）"
+                >
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3Z" />
+                        <circle cx="12" cy="13" r="3" />
+                    </svg>
+                </button>
+                <button
                     onClick={onToggleEmojiPanel}
                     disabled={isSpectator}
                     className="ui-bare-btn text-[var(--c-text)]"
@@ -1174,6 +1191,7 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
     });
     const [isGenerating, setIsGenerating] = useState(false);
     const [offlineMode, setOfflineMode] = useState(false);
+    const [showStoryPhoto, setShowStoryPhoto] = useState(false);
     const [theaterMode, setTheaterMode] = useState(() => kvGet(CHAT_THEATER_MODE_PREFIX + session.id) === "1");
     const [offlineTurns, setOfflineTurns] = useState<ChatOfflineTurn[]>([]);
     const [offlineVisibleCount, setOfflineVisibleCount] = useState(OFFLINE_INITIAL_LOAD);
@@ -6971,6 +6989,7 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
                     onToggleEmojiPanel={() => { setShowEmojiPanel(!showEmojiPanel); setShowStickerPanel(false); setShowPlusMenu(false); }}
                     onSendText={handleOfflineSend}
                     onStopGeneration={clearOfflineGeneration}
+                    onOpenStoryPhoto={() => { if (!session.isGroup) setShowStoryPhoto(true); }}
                 />
             ) : (
             <ChatTextInputBar
@@ -7023,6 +7042,20 @@ export function ChatRoom({ session, onBack, onDeleted, onUserMessageSent, contac
                     cancelLabel="取消"
                     onConfirm={handleMultiDeleteConfirmed}
                     onCancel={() => setShowConfirmMultiDelete(false)}
+                />
+            )}
+
+            {/* 剧情拍照：她从当前剧情里拍一张（她/我/合照），照片进聊天相册并写一条剧情事件 */}
+            {showStoryPhoto && !session.isGroup && (
+                <StoryPhotoDialog
+                    session={session}
+                    characterId={session.contactId}
+                    characterName={character?.name || "她"}
+                    onClose={() => setShowStoryPhoto(false)}
+                    onGenerated={() => {
+                        setOfflineTurns(loadChatOfflineTurns(session.id));
+                        syncMessagesFromStorage();
+                    }}
                 />
             )}
 

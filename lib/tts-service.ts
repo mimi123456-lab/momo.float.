@@ -36,14 +36,14 @@ export function resolveVoiceConfig(characterId: string, appId?: ContentAppId): V
 export async function synthesizeSpeech(
     text: string,
     voiceConfig: VoiceApiConfig,
-    options?: { emotion?: string },
+    options?: { emotion?: string; speed?: number },
 ): Promise<Blob | null> {
     if (!text.trim()) return null;
 
     const provider = voiceConfig.provider;
 
     if (provider === "Minimax") {
-        return synthesizeMinimax(text, voiceConfig, options?.emotion);
+        return synthesizeMinimax(text, voiceConfig, options?.emotion, options?.speed);
     }
 
     if (provider === "OpenAI") {
@@ -123,13 +123,13 @@ function normalizeMinimaxPitch(pitch: number | undefined): number {
     return Math.min(MINIMAX_PITCH_MAX, Math.max(MINIMAX_PITCH_MIN, Math.round(pitch)));
 }
 
-async function synthesizeMinimax(text: string, config: VoiceApiConfig, emotion?: string): Promise<Blob | null> {
+async function synthesizeMinimax(text: string, config: VoiceApiConfig, emotion?: string, speedOverride?: number): Promise<Blob | null> {
     if (!config.apiKey) throw new Error("Minimax API Key 未配置");
 
     const baseUrl = (config.baseUrl || "https://api.minimaxi.com/v1").replace(/\/$/, "");
     const voiceSetting: Record<string, unknown> = {
         voice_id: config.defaultVoice || "male-qn-qingse",
-        speed: normalizeMinimaxSpeed(config.speechSpeed),
+        speed: normalizeMinimaxSpeed(speedOverride ?? config.speechSpeed),
         vol: 1.0,
         pitch: normalizeMinimaxPitch(config.speechPitch),
     };

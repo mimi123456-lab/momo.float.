@@ -98,6 +98,8 @@ import {
     resolveBilingualPrompt,
 } from "./bilingual-prompt-defaults";
 import { parseOfflineResponse, extractThinkingTag, buildOfflineStoryDigest, type ParsedOfflineResponse } from "./chat-offline-storage";
+import { buildStoryProgressPrompt, buildStoryScenePrompt } from "./chat-story-progress";
+import { buildVoiceTonePrompt } from "./voice-tone-profile";
 import { throwIfAborted } from "./abort-utils";
 import { armShortcutContinuation, SHORTCUT_VISION_OFF_NOTE, type ShortcutContinuationHandle, type ShortcutContinuationStyle } from "./shortcut-continuation-client";
 
@@ -2067,6 +2069,11 @@ export async function buildChatPromptMessages(
         if (offlineStyle) {
             llmMessages.push({ role: "system", content: `## 线下文风要求\n${offlineStyle}` });
         }
+        // 手动场景：地点/穿着/氛围这些事实由用户校准，模型不要自己漂。
+        const storyScene = session.isGroup ? "" : buildStoryScenePrompt(session.id);
+        if (storyScene) {
+            llmMessages.push({ role: "system", content: storyScene });
+        }
         // 状态栏只做展示：模型容易把整段回复塞进 [状态栏]，导致正文缺失。
         if (isCustomStatusRegionActive(statusRegionCfg)) {
             llmMessages.push({
@@ -2081,6 +2088,10 @@ export async function buildChatPromptMessages(
         }
     } else if (!session.isGroup) {
         // 线上聊天：补一段最近剧情进度，避免角色回到线上后完全不记得线下发生了什么。
+        const manualStory = buildStoryProgressPrompt(session.id);
+        if (manualStory) {
+            llmMessages.push({ role: "system", content: manualStory });
+        }
         const storyDigest = buildOfflineStoryDigest(session.id);
         if (storyDigest) {
             llmMessages.push({
@@ -2091,10 +2102,16 @@ export async function buildChatPromptMessages(
                     storyDigest,
                     "这些事已经真实发生过，你记得它们。线上聊天时不要当成没发生过，也不要反问用户“什么剧情/之前发生了什么”。",
                     "除非用户主动提起，不要大段复述剧情；按当前这条线上消息自然接话。",
+                    manualStory ? "若这份自动摘要与上面的手动校准冲突，以手动校准为准。" : "",
                     "</offline_story_progress>",
-                ].join("\n"),
+                ].filter(Boolean).join("\n"),
             });
         }
+    }
+    // 语音语气档案：只对私聊注入，避免群聊里多人串味。
+    if (!session.isGroup) {
+        const tonePrompt = buildVoiceTonePrompt(session.contactId);
+        if (tonePrompt) llmMessages.push({ role: "system", content: tonePrompt });
     }
     // 视频/动图能力说明兜底：预设是用户本地副本，老预设或自定义预设可能没有这条指令，
     // 角色会不知道自己能主动发视频。只在线上聊天、且视频生成已配置时注入。

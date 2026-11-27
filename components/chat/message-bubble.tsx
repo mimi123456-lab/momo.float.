@@ -2711,9 +2711,11 @@ function synthesizeVoiceForMessage(msgId: string, characterId: string, speechTex
     if (existing) return existing;
     const task = (async () => {
         const { resolveVoiceConfig, synthesizeSpeech } = await import("@/lib/tts-service");
+        const { detectSpeechEmotion } = await import("@/lib/voice-tone-profile");
         const vc = resolveVoiceConfig(characterId);
         if (!vc) throw new Error("未绑定语音配置");
-        const blob = await synthesizeSpeech(speechText, vc);
+        const { emotion, speed } = detectSpeechEmotion(speechText, characterId);
+        const blob = await synthesizeSpeech(speechText, vc, { emotion, speed });
         if (!blob) throw new Error("合成失败");
         const dataUrl = await new Promise<string>((resolve, reject) => {
             const reader = new FileReader();

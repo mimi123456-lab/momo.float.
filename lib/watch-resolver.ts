@@ -94,9 +94,9 @@ async function evictIfNeeded(index: WatchCacheIndex, keepId: string | null): Pro
   }
 }
 
-/** 展开短链（xhslink 等）；非短链原样返回。手动逐跳跟随，结果只允许还是同一批站点。 */
+/** 展开短链（xhslink / v.douyin.com 等）；非短链原样返回。手动逐跳跟随，结果只允许还是同一批站点。 */
 export async function expandShortLink(url: string): Promise<string> {
-  const shortHosts = new Set(["xhslink.cn", "xhslink.com"]);
+  const shortHosts = new Set(["xhslink.cn", "xhslink.com", "v.douyin.com", "iesdouyin.com"]);
   let host = "";
   try { host = new URL(url).hostname.toLowerCase().replace(/^www\./, ""); } catch { return url; }
   if (!shortHosts.has(host)) return url;
@@ -115,7 +115,7 @@ export async function expandShortLink(url: string): Promise<string> {
     break;
   }
   const finalHost = new URL(current).hostname.toLowerCase().replace(/^www\./, "");
-  if (finalHost.endsWith("xiaohongshu.com")) return current;
+  if (finalHost.endsWith("xiaohongshu.com") || finalHost.endsWith("douyin.com") || finalHost.endsWith("iesdouyin.com")) return current;
   return url;
 }
 
@@ -134,10 +134,62 @@ export function extractXiaohongshuVideo(html: string): { directUrl: string; titl
 
 function assertSafeDownloadHost(rawUrl: string): void {
   const host = new URL(rawUrl).hostname.toLowerCase();
-  const allowed = ["xhscdn.com", "sns-img-qc.xhscdn.com"];
+  const allowed = [
+    "xhscdn.com", "sns-img-qc.xhscdn.com",
+    "douyinvod.com", "bytecdn.com", "douyinpic.com", "byteimg.com", "amemv.com",
+  ];
   if (!allowed.some(suffix => host === suffix || host.endsWith("." + suffix))) {
     throw new Error("直链下载目标不在允许的 CDN 内");
   }
+}
+
+function extractPageTitle(html: string): string {
+  const titleMatch = /<meta\s+name="og:title"\s+content="([^"]*)"/.exec(html)
+    || /<title[^>]*>([^<]*)</.exec(html);
+  return (titleMatch?.[1] || "").trim();
+}
+
+function collectDouyinPlayUrls(node: unknown, out: string[], depth = 0): void {
+  if (!node || depth > 14 || typeof node !== "object") return;
+  const record = node as Record<string, unknown>;
+  for (const key of ["play_addr", "playAddr"]) {
+    const address = record[key];
+    if (!address || typeof address !== "object") continue;
+    const value = address as Record<string, unknown>;
+    for (const listKey of ["url_list", "urlList"]) {
+      const list = value[listKey];
+      if (!Array.isArray(list)) continue;
+      for (const item of list) {
+        if (typeof item === "string" && /^https?:\/\//.test(item) && !out.includes(item)) out.push(item);
+      }
+    }
+    if (typeof value.src === "string" && /^https?:\/\//.test(value.src) && !out.includes(value.src)) out.push(value.src);
+  }
+  for (const value of Object.values(record)) {
+    if (value && typeof value === "object") collectDouyinPlayUrls(value, out, depth + 1);
+  }
+}
+
+/** 抖音分享页：优先解 RENDER_DATA / _ROUTER_DATA，再回退正则；拿不到返回 null。 */
+export function extractDouyinVideo(html: string): { directUrl: string; title: string } | null {
+  const title = extractPageTitle(html).replace(/_抖音.*$/, "").trim() || "抖音视频";
+  const candidates: string[] = [];
+  const scriptPattern = /<script[^>]+id="(?:RENDER_DATA|_ROUTER_DATA)"[^>]*>([\s\S]*?)<\/script>/gi;
+  for (;;) {
+    const match = scriptPattern.exec(html);
+    if (!match) break;
+    try {
+      const jsonText = decodeURIComponent(match[1]);
+      collectDouyinPlayUrls(JSON.parse(jsonText), candidates);
+    } catch { /* 某个 script 解不开就继续试下一个 */ }
+  }
+  if (candidates.length === 0) {
+    const fallback = /"play_addr"[\s\S]{0,400}?"url_list"\s*:\s*\["([^"]+)"/.exec(html);
+    if (fallback?.[1]) candidates.push(fallback[1].replace(/\\u002F/gi, "/").replace(/\\\//g, "/"));
+  }
+  const directUrl = candidates.find(url => /douyinvod|bytecdn|amemv/i.test(url)) || candidates[0];
+  if (!directUrl || !/^https?:\/\//.test(directUrl)) return null;
+  return { directUrl, title };
 }
 
 export type BuiltInResolveResult = {
@@ -153,12 +205,13 @@ export type BuiltInResolveResult = {
  * 抛错时给出可读的中文原因。
  */
 export async function resolveAndCache(videoUrl: string): Promise<BuiltInResolveResult> {
-  // 先展开短链（xhslink.cn → xiaohongshu.com），再做平台判断——顺序反了短链会被直接拒绝。
+  // 先展开短链（xhslink.cn → xiaohongshu.com、v.douyin.com → douyin.com），再做平台判断——顺序反了短链会被直接拒绝。
   const finalUrl = await expandShortLink(videoUrl);
   const parsed = new URL(finalUrl);
   const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
   const isXhs = host === "xiaohongshu.com" || host.endsWith(".xiaohongshu.com");
-  if (!isXhs) throw new Error("内置解析器目前只支持小红书；抖音/快手需要平台签名，无法直接解析，请先保存视频再用本地视频播放");
+  const isDouyin = host === "douyin.com" || host.endsWith(".douyin.com") || host === "iesdouyin.com" || host.endsWith(".iesdouyin.com");
+  if (!isXhs && !isDouyin) throw new Error("内置解析器目前支持小红书和抖音；快手等平台需要平台签名，无法直接解析，请先保存视频再用本地视频播放");
 
   const id = cacheKeyFor(finalUrl);
   const index = await readIndex();
@@ -174,18 +227,25 @@ export async function resolveAndCache(videoUrl: string): Promise<BuiltInResolveR
     } catch { /* 缓存文件没了，重新解析 */ }
   }
 
-  const pageRes = await fetch(finalUrl, { headers: { "User-Agent": MOBILE_UA }, signal: AbortSignal.timeout(25000) });
-  if (!pageRes.ok) throw new Error(`小红书页面请求失败（HTTP ${pageRes.status}）`);
+  const pageRes = await fetch(finalUrl, {
+    headers: { "User-Agent": MOBILE_UA, Referer: isXhs ? "https://www.xiaohongshu.com/" : "https://www.douyin.com/" },
+    signal: AbortSignal.timeout(25000),
+  });
+  if (!pageRes.ok) throw new Error(`${isXhs ? "小红书" : "抖音"}页面请求失败（HTTP ${pageRes.status}）`);
   const html = await pageRes.text();
-  const extracted = extractXiaohongshuVideo(html);
-  if (!extracted) throw new Error("未能从小红书页面提取到视频直链（笔记可能已被删除或需要登录）");
+  const extracted = isXhs ? extractXiaohongshuVideo(html) : extractDouyinVideo(html);
+  if (!extracted) {
+    throw new Error(isXhs
+      ? "未能从小红书页面提取到视频直链（笔记可能已被删除或需要登录）"
+      : "抖音解析失败：分享页可能要求登录或被风控，请改用 APK 原生解析或本地视频");
+  }
   assertSafeDownloadHost(extracted.directUrl);
 
   await mkdir(WATCH_CACHE_DIR, { recursive: true });
   const fileName = `${id}.mp4`;
   const filePath = path.join(WATCH_CACHE_DIR, fileName);
   const download = await fetch(extracted.directUrl, {
-    headers: { "User-Agent": MOBILE_UA, Referer: "https://www.xiaohongshu.com/" },
+    headers: { "User-Agent": MOBILE_UA, Referer: isXhs ? "https://www.xiaohongshu.com/" : "https://www.douyin.com/" },
     signal: AbortSignal.timeout(30 * 60 * 1000),
   });
   if (!download.ok || !download.body) throw new Error(`视频下载失败（HTTP ${download.status}）`);
@@ -218,7 +278,7 @@ export async function resolveAndCache(videoUrl: string): Promise<BuiltInResolveR
     throw new Error("下载内容异常（过小），已放弃");
   }
 
-  index[id] = { id, url: finalUrl, platform: "xiaohongshu", title: extracted.title, file: fileName, size: written, createdAt: Date.now(), lastAccess: Date.now() };
+  index[id] = { id, url: finalUrl, platform: isXhs ? "xiaohongshu" : "douyin", title: extracted.title, file: fileName, size: written, createdAt: Date.now(), lastAccess: Date.now() };
   await evictIfNeeded(index, id);
   await writeIndex(index);
   return { id, cacheHit: false, title: extracted.title, size: written, downloadUrl: `/api/watch-resolver/video/${id}` };

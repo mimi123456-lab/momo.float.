@@ -48,6 +48,8 @@ import { resolveChatAccountUserIdentity } from "@/lib/chat-scope-storage";
 import { removeChatAltAccountFriend } from "@/lib/chat-alt-account-storage";
 import { sendLLMRequest } from "@/lib/chat-engine";
 import { clearStatusRegionConfig, getStatusRegionConfig, hasOwnStatusRegionConfig, saveStatusRegionConfig, clearOfflineStatusRegionConfig, getOfflineStatusRegionConfig, hasOwnOfflineStatusRegionConfig, saveOfflineStatusRegionConfig, presetSupportsStatusRegion, isCustomStatusRegionActive, STATUS_REGION_SCHEME_TARGET, STATUS_REGION_UPDATED_EVENT, type StatusRegionConfig } from "@/lib/chat-status-region";
+import { clearChatStoryProgress, getChatStoryProgress, saveChatStoryProgress } from "@/lib/chat-story-progress";
+import { clearVoiceToneProfile, loadVoiceToneProfile, saveVoiceToneProfile, type VoiceTonePace } from "@/lib/voice-tone-profile";
 import { downloadFile } from "@/lib/download-utils";
 import { createChatRecordExport, importChatRecordFile } from "@/lib/chat-record-transfer";
 import { getSchemes, saveScheme, deleteScheme, type CSSScheme } from "@/lib/css-scheme-storage";
@@ -345,6 +347,15 @@ export function ChatSettingsPanel({
     const [offlineStatusRegion, setOfflineStatusRegion] = useState<StatusRegionConfig>(() => getOfflineStatusRegionConfig(session.id, !session.isGroup));
     const [offlineStatusOwned, setOfflineStatusOwned] = useState(() => hasOwnOfflineStatusRegionConfig(session.id));
     const [statusDialogScope, setStatusDialogScope] = useState<"online" | "offline">("online");
+    // 剧情进度/场景：手动事实层，线上静默同步；拍照也优先用它
+    const [storyProgress, setStoryProgress] = useState(() => getChatStoryProgress(session.id).progress);
+    const [storyScene, setStoryScene] = useState(() => getChatStoryProgress(session.id).scene);
+    const [showStoryEditor, setShowStoryEditor] = useState(false);
+    const [storySaved, setStorySaved] = useState(false);
+    // 语音语气档案：按角色保存，影响台词语气与 TTS 情感/语速
+    const [toneProfile, setToneProfile] = useState(() => loadVoiceToneProfile(session.contactId));
+    const [showToneEditor, setShowToneEditor] = useState(false);
+    const [toneSaved, setToneSaved] = useState(false);
     const [showStatusRegionDialog, setShowStatusRegionDialog] = useState(false);
     const [draftContract, setDraftContract] = useState("");
     const [draftRender, setDraftRender] = useState("");
@@ -1393,6 +1404,73 @@ export function ChatSettingsPanel({
                     </div>
                 )}
 
+                {/* 剧情进度（手动）：用户写的事实层，线上静默读取，不发消息。
+                    与自动摘要冲突时以这里为准；拍照也优先用「当前场景」。 */}
+                {!session.isGroup && (
+                    <div className="menu-group">
+                        <button type="button" className="menu-item" onClick={() => setShowStoryEditor(value => !value)}>
+                            <ChatInfoIcon icon={Camera} color={CONTENT_APP_ACCENTS.story} />
+                            <div className="menu-label-group">
+                                <span className="menu-label">剧情进度（手动）</span>
+                                <span className="menu-desc">
+                                    {storyProgress.trim() || storyScene.trim()
+                                        ? "已设置——线上静默同步，拍照优先用这里"
+                                        : "未设置——点此填写进度、地点、穿着"}
+                                </span>
+                            </div>
+                            <div className="menu-right">
+                                <ChevronRight size={16} style={showStoryEditor ? { transform: "rotate(90deg)" } : undefined} />
+                            </div>
+                        </button>
+                        {showStoryEditor && (
+                            <div className="menu-item" style={{ alignItems: "stretch", flexDirection: "column", gap: 6 }}>
+                                <span className="menu-label">剧情进度</span>
+                                <textarea
+                                    className="chat-settings-textarea"
+                                    rows={3}
+                                    value={storyProgress}
+                                    onChange={event => { setStoryProgress(event.target.value); setStorySaved(false); }}
+                                    placeholder="例：第3章，已到长白山民宿，刚堆完雪人回屋烤火"
+                                />
+                                <span className="menu-label">当前场景（地点 / 时间 / 穿着 / 氛围）</span>
+                                <textarea
+                                    className="chat-settings-textarea"
+                                    rows={3}
+                                    value={storyScene}
+                                    onChange={event => { setStoryScene(event.target.value); setStorySaved(false); }}
+                                    placeholder="例：长白山民宿院子，雪夜；她穿白色羽绒服、围红围巾，鼻尖冻红"
+                                />
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                    <button
+                                        type="button"
+                                        className="ui-btn ui-btn-soft-action"
+                                        onClick={() => {
+                                            saveChatStoryProgress(session.id, { progress: storyProgress, scene: storyScene });
+                                            setStorySaved(true);
+                                        }}
+                                    >
+                                        <Save size={14} /> 保存
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="ui-btn ui-btn-soft-action"
+                                        onClick={() => {
+                                            clearChatStoryProgress(session.id);
+                                            setStoryProgress("");
+                                            setStoryScene("");
+                                            setStorySaved(false);
+                                        }}
+                                    >
+                                        清空
+                                    </button>
+                                    {storySaved && <span className="menu-desc">已保存</span>}
+                                </div>
+                                <span className="menu-desc">线上角色会静默同步这段内容；与自动摘要冲突时以这里为准。</span>
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {/* Toggles */}
                 <div className="menu-group">
                     {!session.isGroup && (
@@ -1669,6 +1747,102 @@ export function ChatSettingsPanel({
                         <input type="file" accept="image/*" onChange={e => handleImageUpload(e, setVoiceBackground, "voiceBackground")} className="hidden" />
                     </label>
                 </div>
+
+                {/* 语音语气档案：自称/称谓/口头禅/句尾/语速/情绪表达。
+                    写进提示词让台词本来就像她，同时给 TTS 传 emotion 与语速。 */}
+                {!session.isGroup && (
+                    <div className="menu-group">
+                        <button type="button" className="menu-item" onClick={() => setShowToneEditor(value => !value)}>
+                            <ChatInfoIcon icon={Mic} color={BINDING_ACCENTS.voice} />
+                            <div className="menu-label-group">
+                                <span className="menu-label">语音语气档案</span>
+                                <span className="menu-desc">
+                                    {toneProfile.selfRef.trim() || toneProfile.addressUser.trim() || toneProfile.catchphrases.trim() || toneProfile.endings.trim() || toneProfile.emotionStyle.trim() || toneProfile.pace !== "normal"
+                                        ? "已设置——影响台词语气与语音情感"
+                                        : "未设置——点此填写自称、称谓、口头禅"}
+                                </span>
+                            </div>
+                            <div className="menu-right">
+                                <ChevronRight size={16} style={showToneEditor ? { transform: "rotate(90deg)" } : undefined} />
+                            </div>
+                        </button>
+                        {showToneEditor && (
+                            <div className="menu-item" style={{ alignItems: "stretch", flexDirection: "column", gap: 6 }}>
+                                <span className="menu-label">自称</span>
+                                <input
+                                    className="ui-input"
+                                    value={toneProfile.selfRef}
+                                    onChange={event => { setToneProfile(profile => ({ ...profile, selfRef: event.target.value })); setToneSaved(false); }}
+                                    placeholder="例：我 / 人家 / 本小姐"
+                                />
+                                <span className="menu-label">称呼对方</span>
+                                <input
+                                    className="ui-input"
+                                    value={toneProfile.addressUser}
+                                    onChange={event => { setToneProfile(profile => ({ ...profile, addressUser: event.target.value })); setToneSaved(false); }}
+                                    placeholder="例：你 / 宝贝 / 笨蛋"
+                                />
+                                <span className="menu-label">口头禅（逗号分隔）</span>
+                                <input
+                                    className="ui-input"
+                                    value={toneProfile.catchphrases}
+                                    onChange={event => { setToneProfile(profile => ({ ...profile, catchphrases: event.target.value })); setToneSaved(false); }}
+                                    placeholder="例：真的假的、要死啊、好嘛"
+                                />
+                                <span className="menu-label">句尾习惯</span>
+                                <input
+                                    className="ui-input"
+                                    value={toneProfile.endings}
+                                    onChange={event => { setToneProfile(profile => ({ ...profile, endings: event.target.value })); setToneSaved(false); }}
+                                    placeholder="例：啊 / 呢 / 嘛 / 啦"
+                                />
+                                <span className="menu-label">语速</span>
+                                <select
+                                    className="ui-input"
+                                    value={toneProfile.pace}
+                                    onChange={event => { setToneProfile(profile => ({ ...profile, pace: event.target.value as VoiceTonePace })); setToneSaved(false); }}
+                                >
+                                    <option value="slow">偏慢</option>
+                                    <option value="normal">正常</option>
+                                    <option value="fast">偏快</option>
+                                </select>
+                                <span className="menu-label">情绪表达</span>
+                                <textarea
+                                    className="chat-settings-textarea"
+                                    rows={3}
+                                    value={toneProfile.emotionStyle}
+                                    onChange={event => { setToneProfile(profile => ({ ...profile, emotionStyle: event.target.value })); setToneSaved(false); }}
+                                    placeholder="例：生气时压低声音、句子变短；开心时语速变快、尾音上扬"
+                                />
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                    <button
+                                        type="button"
+                                        className="ui-btn ui-btn-soft-action"
+                                        onClick={() => {
+                                            setToneProfile(saveVoiceToneProfile(session.contactId, toneProfile));
+                                            setToneSaved(true);
+                                        }}
+                                    >
+                                        <Save size={14} /> 保存
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="ui-btn ui-btn-soft-action"
+                                        onClick={() => {
+                                            clearVoiceToneProfile(session.contactId);
+                                            setToneProfile(loadVoiceToneProfile(session.contactId));
+                                            setToneSaved(false);
+                                        }}
+                                    >
+                                        清空
+                                    </button>
+                                    {toneSaved && <span className="menu-desc">已保存</span>}
+                                </div>
+                                <span className="menu-desc">影响聊天台词语气与语音情感；MiniMax 支持哭泣/开心/生气等情绪，其他音源只调语速。</span>
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {/* Advanced */}
                 <div className="menu-group">

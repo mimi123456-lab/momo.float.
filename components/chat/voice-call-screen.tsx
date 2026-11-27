@@ -399,7 +399,9 @@ export function VoiceCallScreen({ session, character, onEnd, onConnect, initiato
             const voiceConfig = resolveVoiceConfig(session.contactId);
             if (voiceConfig) {
                 try {
-                    const audioBlob = await synthesizeSpeech(speechText, voiceConfig);
+                    const { detectSpeechEmotion } = await import("@/lib/voice-tone-profile");
+                    const { emotion, speed } = detectSpeechEmotion(speechText, session.contactId);
+                    const audioBlob = await synthesizeSpeech(speechText, voiceConfig, { emotion, speed });
                     if (stateRef.current === "ENDED") return;
 
                     if (audioBlob) {
