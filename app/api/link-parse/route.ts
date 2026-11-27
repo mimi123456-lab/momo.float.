@@ -107,7 +107,7 @@ export async function GET(request: Request) {
   if (!/^https?:\/\//i.test(url)) return fail("链接格式不对", 400);
 
   let platform: "xiaohongshu" | "douyin" | "bilibili" | "unknown" = "unknown";
-  if (/xiaohongshu\.com|xhslink\.com/i.test(url)) platform = "xiaohongshu";
+  if (/xiaohongshu\.com|xhslink\.com|xhslink\.cn/i.test(url)) platform = "xiaohongshu";
   else if (/douyin\.com|iesdouyin\.com/i.test(url)) platform = "douyin";
   else if (/bilibili\.com|b23\.tv/i.test(url)) platform = "bilibili";
 
