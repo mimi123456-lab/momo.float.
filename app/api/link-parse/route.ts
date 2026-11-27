@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { fetchXhsNoteViaMcp } from "@/lib/xhs-mcp";
 
 // 链接解析（小红书 / 抖音 / 通用网页）：
 // 服务端抓取分享页，优先读页面内嵌数据，其次读 Open Graph。
@@ -109,6 +110,23 @@ export async function GET(request: Request) {
   if (/xiaohongshu\.com|xhslink\.com/i.test(url)) platform = "xiaohongshu";
   else if (/douyin\.com|iesdouyin\.com/i.test(url)) platform = "douyin";
   else if (/bilibili\.com|b23\.tv/i.test(url)) platform = "bilibili";
+
+  // 小红书优先走可选 MCP 源（更完整的正文/作者）；超时或失败自动回落抓页解析。
+  if (platform === "xiaohongshu") {
+    const viaMcp = await fetchXhsNoteViaMcp(url);
+    if (viaMcp && (viaMcp.title || viaMcp.desc || viaMcp.images.length > 0)) {
+      return ok({
+        platform,
+        title: viaMcp.title,
+        desc: viaMcp.desc,
+        author: viaMcp.author,
+        images: viaMcp.images,
+        video: viaMcp.video,
+        sourceUrl: url,
+        via: "xhs-mcp",
+      });
+    }
+  }
 
   let html = "";
   let finalUrl = url;
