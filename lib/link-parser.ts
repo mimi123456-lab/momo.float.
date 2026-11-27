@@ -7,7 +7,7 @@ const PARSER_CONFIG_KEY = "ai_phone_link_parser_v1";
 registerKvMigration(PARSER_CONFIG_KEY);
 
 export type LinkParseResult = {
-  platform: "xiaohongshu" | "douyin" | "unknown";
+  platform: "xiaohongshu" | "douyin" | "bilibili" | "unknown";
   title: string;
   desc: string;
   author: string;
@@ -38,6 +38,7 @@ export function clearLinkParserBaseUrl(): void {
 export function detectPlatform(url: string): LinkParseResult["platform"] {
   if (/xiaohongshu\.com|xhslink\.com/i.test(url)) return "xiaohongshu";
   if (/douyin\.com|iesdouyin\.com/i.test(url)) return "douyin";
+  if (/bilibili\.com|b23\.tv/i.test(url)) return "bilibili";
   return "unknown";
 }
 

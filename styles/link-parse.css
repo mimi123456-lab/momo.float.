@@ -283,3 +283,76 @@
 @keyframes lps-rotate { to { transform: rotate(360deg); } }
 @keyframes lps-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes lps-up { from { transform: translateY(14%); opacity: .6; } to { transform: translateY(0); opacity: 1; } }
+
+/* ── 选择角色：把链接发给角色看 ── */
+.lps-picker-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(14, 16, 20, .34);
+  backdrop-filter: blur(6px);
+  animation: lps-fade .18s ease;
+}
+
+.lps-picker {
+  width: 100%;
+  max-width: 460px;
+  max-height: 72vh;
+  overflow: auto;
+  padding: 14px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  border-radius: 18px 18px 0 0;
+  background: #fff;
+  box-shadow: 0 -12px 40px rgba(20, 22, 27, .18);
+  animation: lps-up .22s ease;
+}
+
+.lps-picker header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.lps-picker header strong { font-size: calc(13px * var(--app-text-scale, 1)); }
+
+.lps-picker header button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, .05);
+  color: #6b7078;
+}
+
+.lps-picker-list { display: flex; flex-direction: column; gap: 6px; }
+
+.lps-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 12px;
+  background: #f7f7f9;
+  font-size: calc(12px * var(--app-text-scale, 1));
+  text-align: left;
+}
+
+.lps-picker-item:active { background: #eff0f3; }
+
+.lps-picker-avatar {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 9px;
+  background: #e9eaee;
+  color: #5c6169;
+  font-size: calc(12px * var(--app-text-scale, 1));
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ClipboardPaste, ExternalLink, Link2, LoaderCircle, X } from "lucide-react";
+import { ClipboardPaste, ExternalLink, Link2, LoaderCircle, Send, X } from "lucide-react";
 
 import {
   clearLinkParserBaseUrl,
@@ -10,6 +10,8 @@ import {
   saveLinkParserBaseUrl,
   type LinkParseResult,
 } from "@/lib/link-parser";
+import { loadCharacters } from "@/lib/character-storage";
+import { CHAT_REQUEST_REPLY_EVENT, createOrGetSession, pushChatMessage } from "@/lib/chat-storage";
 
 type Props = {
   open: boolean;
@@ -20,7 +22,15 @@ type Props = {
 const PLATFORM_LABEL: Record<LinkParseResult["platform"], string> = {
   xiaohongshu: "小红书",
   douyin: "抖音",
+  bilibili: "哔哩哔哩",
   unknown: "网页",
+};
+
+const LINK_PLATFORM: Record<LinkParseResult["platform"], "xiaohongshu" | "douyin" | "bilibili" | "web"> = {
+  xiaohongshu: "xiaohongshu",
+  douyin: "douyin",
+  bilibili: "bilibili",
+  unknown: "web",
 };
 
 export function LinkParseSheet({ open, onClose, onNotice }: Props) {
@@ -31,6 +41,32 @@ export function LinkParseSheet({ open, onClose, onNotice }: Props) {
   const [baseUrl, setBaseUrl] = useState("");
   const [savedBase, setSavedBase] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const sendToCharacter = useCallback((characterId: string, characterName: string) => {
+    if (!result) return;
+    const label = PLATFORM_LABEL[result.platform];
+    const session = createOrGetSession(characterId);
+    const desc = [result.desc, result.author ? `作者：${result.author}` : ""].filter(Boolean).join("\n").slice(0, 800);
+    pushChatMessage({
+      sessionId: session.id,
+      role: "user",
+      content: `[分享了一条${label}内容:${result.title || "无标题"}] ${desc}`.trim(),
+      mediaType: "link_share",
+      mediaData: {
+        linkPlatform: LINK_PLATFORM[result.platform],
+        linkTitle: result.title || `${label}内容`,
+        linkDesc: desc,
+        linkCover: result.images[0] || result.video || "",
+        linkUrl: result.sourceUrl,
+      },
+    });
+    window.dispatchEvent(new CustomEvent("chat-messages-updated", { detail: { sessionId: session.id } }));
+    window.dispatchEvent(new CustomEvent(CHAT_REQUEST_REPLY_EVENT, { detail: { sessionId: session.id } }));
+    onNotice?.(`已分享给${characterName}`);
+    setPickerOpen(false);
+    onClose();
+  }, [onClose, onNotice, result]);
 
   useEffect(() => {
     if (!open) return;
@@ -141,6 +177,9 @@ export function LinkParseSheet({ open, onClose, onNotice }: Props) {
               ) : null}
               {result.video ? <video className="lps-video" src={result.video} controls playsInline preload="metadata" /> : null}
               <div className="lps-result-actions">
+                <button type="button" className="lps-btn lps-btn--primary" onClick={() => setPickerOpen(true)}>
+                  <Send size={13} /> 发给角色
+                </button>
                 <button type="button" className="lps-btn lps-btn--ghost" onClick={() => void copyText()}>复制文案</button>
                 <a className="lps-btn lps-btn--ghost" href={result.sourceUrl} target="_blank" rel="noreferrer">
                   <ExternalLink size={13} /> 打开原链接
@@ -181,6 +220,33 @@ export function LinkParseSheet({ open, onClose, onNotice }: Props) {
           </div>
         </div>
       </section>
+
+      {pickerOpen ? (
+        <div className="lps-picker-mask" role="dialog" aria-label="选择角色" onClick={() => setPickerOpen(false)}>
+          <section className="lps-picker" onClick={event => event.stopPropagation()}>
+            <header>
+              <strong>发给谁看</strong>
+              <button type="button" onClick={() => setPickerOpen(false)} aria-label="关闭"><X size={16} /></button>
+            </header>
+            <div className="lps-picker-list">
+              {loadCharacters().length === 0 ? (
+                <p className="lps-hint">还没有角色，先去创建一个角色。</p>
+              ) : loadCharacters().map(character => (
+                <button
+                  key={character.id}
+                  type="button"
+                  className="lps-picker-item"
+                  onClick={() => sendToCharacter(character.id, character.name)}
+                >
+                  <span className="lps-picker-avatar">{(character.name || "?").slice(0, 1)}</span>
+                  <span>{character.name}</span>
+                </button>
+              ))}
+            </div>
+            <p className="lps-hint">角色会看到平台、标题、正文和封面，并按内容回应你。</p>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

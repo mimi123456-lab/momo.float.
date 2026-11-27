@@ -105,9 +105,10 @@ export async function GET(request: Request) {
   const url = (new URL(request.url).searchParams.get("url") || "").trim();
   if (!/^https?:\/\//i.test(url)) return fail("链接格式不对", 400);
 
-  let platform: "xiaohongshu" | "douyin" | "unknown" = "unknown";
+  let platform: "xiaohongshu" | "douyin" | "bilibili" | "unknown" = "unknown";
   if (/xiaohongshu\.com|xhslink\.com/i.test(url)) platform = "xiaohongshu";
   else if (/douyin\.com|iesdouyin\.com/i.test(url)) platform = "douyin";
+  else if (/bilibili\.com|b23\.tv/i.test(url)) platform = "bilibili";
 
   let html = "";
   let finalUrl = url;

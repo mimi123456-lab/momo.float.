@@ -144,6 +144,7 @@ export type ChatMessage = {
         | "phone_call" | "sms_notice"
         | "couple_invite"
         | "xiaohongshu_note_share"
+        | "link_share"
         | "gift"
         | "contact_card"
         | "app_card"
@@ -246,6 +247,12 @@ export type ChatMessage = {
         xiaohongshuImageAssetId?: string;
         xiaohongshuCoverIcon?: string;
         xiaohongshuTone?: string;
+        /** 通用链接分享（小红书/抖音/B站/网页），让角色看到标题、正文和封面。 */
+        linkPlatform?: "xiaohongshu" | "douyin" | "bilibili" | "web";
+        linkTitle?: string;
+        linkDesc?: string;
+        linkCover?: string;
+        linkUrl?: string;
         callDuration?: string;    // 通话时长（如 05:23）
         voiceDuration?: number;   // 语音条时长（秒）
         synthesizedFromText?: string; // 语音条当前音频对应的合成文本

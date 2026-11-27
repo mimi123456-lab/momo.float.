@@ -1239,6 +1239,18 @@ export function formatRichMediaForHistory(msg: ChatMessage, userName: string, ch
             const mTitle = d?.musicTitle || "未知歌曲";
             return `[音乐分享:${mTitle}]`;
         }
+        case "link_share": {
+            const platformLabel = d?.linkPlatform === "douyin"
+                ? "抖音"
+                : d?.linkPlatform === "bilibili"
+                    ? "哔哩哔哩"
+                    : d?.linkPlatform === "xiaohongshu"
+                        ? "小红书"
+                        : "网页";
+            const linkTitle = d?.linkTitle || "链接";
+            const linkDesc = (d?.linkDesc || "").trim().slice(0, 300);
+            return `[分享了一条${platformLabel}内容:${linkTitle}]${linkDesc ? ` ${linkDesc}` : ""}`;
+        }
         case "xiaohongshu_note_share":
             return formatXiaohongshuShareForPrompt({
                 author: d?.xiaohongshuAuthor,

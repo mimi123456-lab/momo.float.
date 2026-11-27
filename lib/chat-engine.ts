@@ -97,7 +97,7 @@ import {
     DEFAULT_OFFLINE_CHAT_BILINGUAL_PROMPT,
     resolveBilingualPrompt,
 } from "./bilingual-prompt-defaults";
-import { parseOfflineResponse, extractThinkingTag, type ParsedOfflineResponse } from "./chat-offline-storage";
+import { parseOfflineResponse, extractThinkingTag, buildOfflineStoryDigest, type ParsedOfflineResponse } from "./chat-offline-storage";
 import { throwIfAborted } from "./abort-utils";
 import { armShortcutContinuation, SHORTCUT_VISION_OFF_NOTE, type ShortcutContinuationHandle, type ShortcutContinuationStyle } from "./shortcut-continuation-client";
 
@@ -2076,6 +2076,22 @@ export async function buildChatPromptMessages(
                     "1. 先输出 [状态栏]...[/状态栏]，只放状态数据。",
                     "2. 空一行，再输出聊天正文。",
                     "禁止只输出状态栏；[/状态栏] 之后必须有正文。",
+                ].join("\n"),
+            });
+        }
+    } else if (!session.isGroup) {
+        // 线上聊天：补一段最近剧情进度，避免角色回到线上后完全不记得线下发生了什么。
+        const storyDigest = buildOfflineStoryDigest(session.id);
+        if (storyDigest) {
+            llmMessages.push({
+                role: "system",
+                content: [
+                    "<offline_story_progress>",
+                    "## 你们最近的剧情进度（线下）",
+                    storyDigest,
+                    "这些事已经真实发生过，你记得它们。线上聊天时不要当成没发生过，也不要反问用户“什么剧情/之前发生了什么”。",
+                    "除非用户主动提起，不要大段复述剧情；按当前这条线上消息自然接话。",
+                    "</offline_story_progress>",
                 ].join("\n"),
             });
         }

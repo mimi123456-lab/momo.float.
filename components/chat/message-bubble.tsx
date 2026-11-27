@@ -136,6 +136,8 @@ export const MessageBubble = memo(function MessageBubble({ msg, onUpdate, charNa
             return <MediaFileBubble msg={msg} onUpdate={onUpdate} characterId={characterId} />;
         case "xiaohongshu_note_share":
             return <XiaohongshuShareBubble msg={msg} />;
+        case "link_share":
+            return <LinkShareBubble msg={msg} />;
         case "audio":
             return <VoiceMessageBubble msg={msg} characterId={characterId} onUpdate={onUpdate} defaultTranslationExpanded={defaultTranslationExpanded} />;
         case "meeting_invite":
@@ -2607,6 +2609,36 @@ function CoupleInviteBubble({
                 ) : (
                     <span style={{ fontSize: 12, color: "var(--c-text-secondary, #8a8a8a)" }}>{statusText}</span>
                 )}
+            </div>
+        </div>
+    );
+}
+
+// ── Generic Link Share Bubble（小红书 / 抖音 / B站 / 网页） ──
+function LinkShareBubble({ msg }: { msg: ChatMessage }) {
+    const data = msg.mediaData;
+    const platform = data?.linkPlatform;
+    const label = platform === "douyin" ? "抖音" : platform === "bilibili" ? "哔哩哔哩" : platform === "xiaohongshu" ? "小红书" : "网页";
+    const mark = platform === "douyin" ? "DY" : platform === "bilibili" ? "BILI" : platform === "xiaohongshu" ? "RED" : "WEB";
+    const tone = platform === "douyin" ? "graphite" : platform === "bilibili" ? "mist" : "blush";
+    const title = data?.linkTitle || "分享的内容";
+    const desc = data?.linkDesc || "";
+    const cover = data?.linkCover || "";
+
+    return (
+        <div className="chat-xhs-share-card">
+            <div className="chat-xhs-share-head">
+                <span className="chat-xhs-share-mark">{mark}</span>
+                <span>{label}</span>
+            </div>
+            <div className="chat-xhs-share-body">
+                <div className={`chat-xhs-share-cover chat-xhs-share-cover--${tone}`}>
+                    {cover ? <img src={cover} alt="" /> : <span>链</span>}
+                </div>
+                <div className="chat-xhs-share-info">
+                    <div className="chat-xhs-share-title">{title}</div>
+                    <div className="chat-xhs-share-desc">{desc}</div>
+                </div>
             </div>
         </div>
     );

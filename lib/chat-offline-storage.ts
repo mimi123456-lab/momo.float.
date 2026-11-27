@@ -142,12 +142,17 @@ export function appendChatOfflineTurn(input: {
     thinkingText?: string;
     thinkingTag?: string;
 }): ChatOfflineTurn {
+    // 模型偶尔不吐 summary 标签；这里兜底用正文压缩一句，保证记忆投影不会整轮丢失。
+    const fallbackSummary = compactProjectionText(
+        [input.userContent, input.assistantContent].filter(Boolean).join(" "),
+        180,
+    );
     const turn: ChatOfflineTurn = {
         id: createTurnId(),
         sessionId: input.sessionId,
         userContent: input.userContent,
         assistantContent: input.assistantContent,
-        summary: input.summary,
+        summary: input.summary.trim() || fallbackSummary,
         summaryTag: input.summaryTag.trim() || "summary",
         rawText: input.rawText,
         reasoningText: input.reasoningText,
@@ -223,7 +228,8 @@ export function loadChatOfflineProjectionEntries(
         entries.push(...loadMigratedSummaryEntries(session.id));
         for (const turn of loadChatOfflineTurns(session.id)) {
             if (options?.afterTimestamp && turn.createdAt <= options.afterTimestamp) continue;
-            const summaryText = compactProjectionText(turn.summary, 500);
+            // 老数据可能没有 summary：退回正文摘要，避免历史剧情永远进不了记忆。
+            const summaryText = compactProjectionText(turn.summary || turn.assistantContent, 500);
             if (!summaryText) continue;
             const ts = formatChatTimestamp(turn.createdAt);
             entries.push({
@@ -237,6 +243,18 @@ export function loadChatOfflineProjectionEntries(
     }
 
     return entries.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+}
+
+/**
+ * 线上聊天用：把最近几轮线下剧情压缩成一段进度摘要，避免线上角色「不知道剧情在做什么」。
+ * 老数据没有 summary 时回退到当轮正文，保证早期剧情也算进去。
+ */
+export function buildOfflineStoryDigest(sessionId: string, limit = 3): string {
+    const turns = loadChatOfflineTurns(sessionId).slice(-limit);
+    const lines = turns
+        .map(turn => compactProjectionText(turn.summary || turn.assistantContent, 140))
+        .filter(Boolean);
+    return lines.map((line, index) => `${index + 1}. ${line}`).join("\n");
 }
 
 function escapeTagName(tag: string): string {
