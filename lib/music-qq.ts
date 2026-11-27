@@ -4,6 +4,7 @@
 
 import { kvGet, kvSet, kvRemove, registerKvMigration } from "./kv-db";
 import { getNeteasePlayInfo, searchNetease } from "./music-service";
+import { gdSongUrl, resolveGdPlaySource } from "./gd-music";
 
 export type QqSong = {
   songmid: string;
@@ -25,7 +26,7 @@ export type QqPlaylist = {
 
 export type QqPlaySource = {
   url: string;
-  via: "qq" | "netease" | "itunes" | "none";
+  via: "qq" | "netease" | "gd" | "itunes" | "none";
   note?: string;
 };
 
@@ -90,8 +91,14 @@ export async function loadQqLyrics(songmid: string): Promise<string> {
   return data?.ok ? data.lyric : "";
 }
 
-/** 三级兜底取播放地址：QQ vkey → 网易云同名 → iTunes 试听。 */
+/** 四级兜底取播放地址：免 Cookie 直连 → QQ vkey → 网易云同名 → 免 Cookie 同名 → iTunes 试听。 */
 export async function resolveQqPlaySource(song: QqSong): Promise<QqPlaySource> {
+  // 免 Cookie 音源列表里的歌，songmid 前缀是 gd:，直接用网易云 id 取真实地址
+  if (song.songmid.startsWith("gd:")) {
+    const url = await gdSongUrl(song.mediaMid || song.songmid.slice(3));
+    if (url) return { url, via: "gd" };
+  }
+
   const direct = await qqApi<{ ok: boolean; url: string }>("url", { mid: song.songmid, mediaMid: song.mediaMid });
   if (direct?.ok && direct.url) {
     return { url: direct.url.replace(/^http:\/\//, "https://"), via: "qq" };
@@ -102,6 +109,13 @@ export async function resolveQqPlaySource(song: QqSong): Promise<QqPlaySource> {
     for (const item of results) {
       const info = await getNeteasePlayInfo(item.id);
       if (info?.url) return { url: info.url, via: "netease" };
+    }
+  } catch { /* 继续兜底 */ }
+
+  try {
+    const gd = await resolveGdPlaySource(song.name, song.singer);
+    if (gd?.url) {
+      return { url: gd.url, via: "gd", note: "已用免 Cookie 公开音源播放（第三方试听接口）" };
     }
   } catch { /* 继续兜底 */ }
 

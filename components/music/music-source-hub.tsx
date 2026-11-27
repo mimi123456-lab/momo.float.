@@ -28,8 +28,9 @@ import {
   type QqPlaylist,
   type QqSong,
 } from "@/lib/music-qq";
+import { gdPicUrl, loadGdPlaylist, searchGdSongs, type GdSong } from "@/lib/gd-music";
 
-type HubTab = "qq" | "backend" | "soda";
+type HubTab = "qq" | "backend" | "soda" | "gd";
 
 type Props = {
   onClose: () => void;
@@ -37,7 +38,20 @@ type Props = {
 };
 
 function coverOf(song: QqSong): string | undefined {
+  if (song.albumMid.startsWith("gd:")) return gdPicUrl(song.albumMid.slice(3)) || undefined;
   return song.albumMid ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${song.albumMid}.jpg` : undefined;
+}
+
+function gdToQqSong(song: GdSong): QqSong {
+  return {
+    songmid: `gd:${song.id}`,
+    name: song.name,
+    singer: song.singer,
+    album: song.album,
+    albumMid: song.picId ? `gd:${song.picId}` : "",
+    mediaMid: song.urlId,
+    interval: 0,
+  };
 }
 
 function toTrack(song: QqSong): MusicTrack {
@@ -81,6 +95,12 @@ export function MusicSourceHub({ onClose, onToast }: Props) {
   const [sodaSongs, setSodaSongs] = useState<QqSong[]>([]);
   const [sodaLoading, setSodaLoading] = useState(true);
 
+  const [gdQuery, setGdQuery] = useState("");
+  const [gdSongs, setGdSongs] = useState<QqSong[]>([]);
+  const [gdTitle, setGdTitle] = useState("热歌榜");
+  const [gdLoading, setGdLoading] = useState(true);
+  const [gdSearching, setGdSearching] = useState(false);
+
   const [loggedIn, setLoggedIn] = useState(() => Boolean(loadQqCookie()));
   const [qrOpen, setQrOpen] = useState(false);
   const [qrImage, setQrImage] = useState("");
@@ -122,6 +142,38 @@ export function MusicSourceHub({ onClose, onToast }: Props) {
   useEffect(() => {
     void refreshSoda(SODA_MOODS[Math.floor(Math.random() * SODA_MOODS.length)].id);
   }, [refreshSoda]);
+
+  // 免 Cookie 音源：默认拉网易云热歌榜
+  const openGdList = useCallback(async (id: string, label: string) => {
+    setGdLoading(true);
+    setGdTitle(label);
+    const songs = await loadGdPlaylist(id);
+    setGdSongs(songs.map(gdToQqSong));
+    setGdLoading(false);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadGdPlaylist("3778678").then(songs => {
+      if (cancelled) return;
+      setGdSongs(songs.map(gdToQqSong));
+      setGdLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleGdSearch = useCallback(async () => {
+    const keyword = gdQuery.trim();
+    if (!keyword || gdSearching) return;
+    setGdSearching(true);
+    setGdLoading(true);
+    setGdTitle(`搜索：${keyword}`);
+    const songs = await searchGdSongs(keyword, 20);
+    setGdSongs(songs.map(gdToQqSong));
+    setGdLoading(false);
+    setGdSearching(false);
+    if (songs.length === 0) showNotice("免 Cookie 音源没搜到，换个关键词试试");
+  }, [gdQuery, gdSearching, showNotice]);
 
   const handleSearch = useCallback(async () => {
     const keyword = query.trim();
@@ -185,7 +237,7 @@ export function MusicSourceHub({ onClose, onToast }: Props) {
 
     // 配了 QQ 后端就优先走真实音源，拿不到再退回三级兜底
     const backend = loadQqBackendConfig();
-    if (backend) {
+    if (backend && !song.songmid.startsWith("gd:")) {
       try {
         const hits = await backendSearch(backend, `${song.name} ${song.singer}`.trim(), 5);
         const hit = hits.find(item => item.title.includes(song.name) || song.name.includes(item.title)) || hits[0];
@@ -208,6 +260,7 @@ export function MusicSourceHub({ onClose, onToast }: Props) {
     }
     player.playUrl(source.url, toTrack(song));
     if (source.note) showNotice(source.note);
+    else if (source.via === "gd") showNotice("已用免 Cookie 公开音源播放");
     else if (source.via === "netease") showNotice("QQ 音源受限，已自动切到网易云同名音频");
   }, [busyId, player, showNotice]);
 
@@ -259,7 +312,7 @@ export function MusicSourceHub({ onClose, onToast }: Props) {
   const sodaMood = useMemo(() => SODA_MOODS.find(item => item.id === sodaMoodId) || SODA_MOODS[0], [sodaMoodId]);
 
   const renderSongList = (songs: QqSong[], emptyHint: string) => {
-    if (listLoading && tab === "qq") {
+    if ((listLoading && tab === "qq") || (gdLoading && tab === "gd")) {
       return <div className="msh-empty"><LoaderCircle className="msh-spin" size={22} /> 正在加载…</div>;
     }
     if (songs.length === 0) return <div className="msh-empty">{emptyHint}</div>;
@@ -292,7 +345,7 @@ export function MusicSourceHub({ onClose, onToast }: Props) {
         </button>
         <div className="msh-title">
           <strong>音源中心</strong>
-          <small>QQ音乐 · 汽水风格</small>
+          <small>QQ音乐 · 汽水风格 · 免登录音源</small>
         </div>
         {tab === "qq" ? (
           loggedIn ? (
@@ -315,6 +368,7 @@ export function MusicSourceHub({ onClose, onToast }: Props) {
         <button type="button" data-active={tab === "qq" ? "1" : undefined} onClick={() => setTab("qq")}>QQ音乐</button>
         <button type="button" data-active={tab === "backend" ? "1" : undefined} onClick={() => setTab("backend")}>我的QQ</button>
         <button type="button" data-active={tab === "soda" ? "1" : undefined} onClick={() => setTab("soda")}>汽水音乐</button>
+        <button type="button" data-active={tab === "gd" ? "1" : undefined} onClick={() => setTab("gd")}>免登录</button>
       </div>
 
       {tab === "backend" ? (
@@ -379,6 +433,35 @@ export function MusicSourceHub({ onClose, onToast }: Props) {
           ) : null}
 
           <p className="msh-note">曲库来自 QQ 音乐网页端公开接口；在「我的QQ」里配好后端后，这里播放会优先用你账号的真实音源，否则依次尝试 QQ 音源、网易云同名歌曲、iTunes 试听。</p>
+        </div>
+      ) : tab === "gd" ? (
+        <div className="msh-body">
+          <form
+            className="msh-search"
+            onSubmit={event => { event.preventDefault(); void handleGdSearch(); }}
+          >
+            <Search size={15} />
+            <input
+              value={gdQuery}
+              onChange={event => setGdQuery(event.target.value)}
+              placeholder="搜索歌曲、歌手（免登录）"
+              aria-label="搜索免 Cookie 音源"
+            />
+            <button type="submit" disabled={!gdQuery.trim() || gdSearching}>
+              {gdSearching ? "…" : "搜索"}
+            </button>
+          </form>
+
+          <div className="msh-quick">
+            <button type="button" onClick={() => void openGdList("3778678", "热歌榜")}>热歌榜</button>
+            <button type="button" onClick={() => void openGdList("3779629", "新歌榜")}>新歌榜</button>
+            <button type="button" onClick={() => void openGdList("19723756", "飙升榜")}>飙升榜</button>
+          </div>
+
+          <div className="msh-section-title">{gdTitle}</div>
+          {renderSongList(gdSongs, "这个列表暂时取不到歌，稍后再试")}
+
+          <p className="msh-note">免 Cookie 音源来自第三方公开试听接口（GD 音乐台），不用登录也不用自建后端，点歌直接出真实音频地址。对方限制约 5 分钟 50 次请求，所以有缓存；第三方服务可能变更，失效时换其他音源或配置「我的QQ」后端。</p>
         </div>
       ) : (
         <div className="msh-body msh-body--soda">
