@@ -60,6 +60,8 @@ export function cleanStorySyncText(input: string): string {
     text = text.replace(/<script[\s\S]*?<\/script>/gi, " ");
     text = text.replace(/<style[\s\S]*?<\/style>/gi, " ");
     text = text.replace(/```[\s\S]*?```/g, " ");
+    // 状态栏是剧情 App 内的展示数据（好感度/穿搭等），不进线上记忆；只同步叙事正文。
+    text = text.replace(/\[(?:状态栏|status)\][\s\S]*?\[\/(?:状态栏|status)\]/gi, " ");
     text = text.replace(/\[\/?(?:状态栏|status)\]/gi, " ");
     text = text.replace(/<[^>]+>/g, " ");
     text = text.replace(/&nbsp;/gi, " ").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&amp;/gi, "&");
