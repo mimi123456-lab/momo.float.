@@ -22,7 +22,7 @@ type McpRpcResult = {
 };
 
 const DEFAULT_ENDPOINT = "https://xhs-mcp-one.vercel.app/api/xhs-mcp";
-const MCP_TIMEOUT_MS = 7000;
+const MCP_TIMEOUT_MS = 9000;
 
 export type XhsNoteViaMcp = {
   title: string;
@@ -143,7 +143,7 @@ function buildToolArguments(tool: McpTool, raw: string): Record<string, unknown>
   const urlKey = pick("url", "note_url", "share_url", "link", "share_text");
   if (urlKey) args[urlKey] = raw;
   if (noteId) {
-    const idKey = pick("note_id", "noteId", "id");
+    const idKey = pick("feed_id", "note_id", "noteId", "id");
     if (idKey) args[idKey] = noteId;
   }
   if (xsecToken) {
@@ -232,21 +232,35 @@ function normalizeNote(payload: unknown): XhsNoteViaMcp | null {
   const descFromObject = findKeyValue(data, ["desc", "description", "content", "noteContent", "note_content"]);
   const authorFromObject = findKeyValue(data, ["nickname", "author", "userName", "user_name"]);
 
+  // 该 MCP 的 feed_detail 返回的是「笔记 [id] 标题\n作者: ...\n正文：...」这种纯文本。
+  const textTitle = /^笔记\s*\[[^\]]+\]\s*([^\n]+)/m.exec(rawText)?.[1]?.trim() || "";
+  const textAuthor = /作者[:：]\s*([^\n(（]+)/.exec(rawText)?.[1]?.trim() || "";
+  const textBody = /正文[:：]\s*([\s\S]*?)(?:\n\s*评论区[:：]|$)/.exec(rawText)?.[1]?.trim() || "";
+
   const title = (titleFromObject != null ? String(titleFromObject) : "")
     || pick(/"title"\s*:\s*"([^"]{2,120})"/)
-    || rawText.split(/\r?\n/)[0]?.replace(/^#+\s*/, "").trim()
+    || textTitle
+    || rawText.split(/\r?\n/)[0]?.replace(/^#+\s*/, "").replace(/^笔记\s*\[[^\]]+\]\s*/, "").trim()
     || "";
   const desc = (descFromObject != null ? String(descFromObject) : "")
+    || textBody
     || pick(/"desc"\s*:\s*"((?:[^"\\]|\\.){2,4000})"/)
     || pick(/"content"\s*:\s*"((?:[^"\\]|\\.){2,4000})"/)
     || rawText.slice(0, 4000);
   const author = (authorFromObject != null ? String(authorFromObject) : "")
+    || textAuthor
     || pick(/"nickname"\s*:\s*"([^"]{1,40})"/)
     || pick(/"author"\s*:\s*"([^"]{1,40})"/);
   const images = Array.from(new Set(Array.from(flat.matchAll(/https?:\/\/[^\s"'\\)]+\.(?:jpg|jpeg|png|webp)/gi)).map(item => item[0]))).slice(0, 12);
   const video = flat.match(/https?:\/\/[^\s"'\\)]+\.(?:mp4|m3u8)/i)?.[0] || "";
 
-  const clean = (value: string) => value.replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\u002F/g, "/").trim();
+  const clean = (value: string) => value
+    .replace(/\\n/g, "\n")
+    .replace(/\\"/g, '"')
+    .replace(/\\u002F/g, "/")
+    .replace(/#[^#\n]{1,24}\[话题\]#/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
   const result = { title: clean(title), desc: clean(desc), author: clean(author), images, video };
   if (!result.title && !result.desc && !result.images.length && !result.video) return null;
   return result;
@@ -261,12 +275,28 @@ export async function fetchXhsNoteViaMcp(rawUrl: string): Promise<XhsNoteViaMcp 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), MCP_TIMEOUT_MS);
   try {
+    // 短链没有 note_id；先跟随一次跳转拿真实地址，MCP 的 feed_detail 必须要有 feed_id。
+    let resolvedUrl = rawUrl;
+    if (!noteIdFromUrl(resolvedUrl)) {
+      try {
+        const hop = await fetch(rawUrl, {
+          redirect: "follow",
+          headers: { "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15" },
+          signal: controller.signal,
+          cache: "no-store",
+        });
+        resolvedUrl = hop.url || resolvedUrl;
+        void hop.body?.cancel().catch(() => undefined);
+      } catch { /* 短链解析失败时仍尝试把原链接交给 MCP */ }
+    }
+    if (!noteIdFromUrl(resolvedUrl)) return null;
+
     const session = new McpSession(url);
     if (!(await session.initialize(controller.signal))) return null;
     const tools = await session.listTools(controller.signal);
     const tool = pickNoteTool(tools);
     if (!tool?.name) return null;
-    const args = buildToolArguments(tool, rawUrl);
+    const args = buildToolArguments(tool, resolvedUrl);
     if (!args) return null;
     const result = await session.callTool(tool.name, args, controller.signal);
     return normalizeNote(result);
