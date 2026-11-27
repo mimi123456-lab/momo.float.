@@ -99,6 +99,7 @@ import {
 } from "./bilingual-prompt-defaults";
 import { parseOfflineResponse, extractThinkingTag, buildOfflineStoryDigest, type ParsedOfflineResponse } from "./chat-offline-storage";
 import { buildStoryProgressPrompt, buildStoryScenePrompt } from "./chat-story-progress";
+import { buildStorySyncPrompt } from "./story-chat-sync";
 import { buildVoiceTonePrompt } from "./voice-tone-profile";
 import { throwIfAborted } from "./abort-utils";
 import { armShortcutContinuation, SHORTCUT_VISION_OFF_NOTE, type ShortcutContinuationHandle, type ShortcutContinuationStyle } from "./shortcut-continuation-client";
@@ -2074,6 +2075,11 @@ export async function buildChatPromptMessages(
         if (storyScene) {
             llmMessages.push({ role: "system", content: storyScene });
         }
+        // 剧情 App 的实时进展：线下模式也要知道剧情线刚发生了什么
+        const offlineStorySync = session.isGroup ? "" : buildStorySyncPrompt(session.contactId);
+        if (offlineStorySync) {
+            llmMessages.push({ role: "system", content: offlineStorySync });
+        }
         // 状态栏只做展示：模型容易把整段回复塞进 [状态栏]，导致正文缺失。
         if (isCustomStatusRegionActive(statusRegionCfg)) {
             llmMessages.push({
@@ -2091,6 +2097,11 @@ export async function buildChatPromptMessages(
         const manualStory = buildStoryProgressPrompt(session.id);
         if (manualStory) {
             llmMessages.push({ role: "system", content: manualStory });
+        }
+        // 剧情 App 的实时进展（与聊天室共用同一份同步记忆，不等总结）
+        const storySync = buildStorySyncPrompt(session.contactId);
+        if (storySync) {
+            llmMessages.push({ role: "system", content: storySync });
         }
         const storyDigest = buildOfflineStoryDigest(session.id);
         if (storyDigest) {

@@ -21,6 +21,8 @@ import { parseStoryResponse } from "./story-parser";
 import { STORY_PARSER_VERSION } from "./story-parser";
 import { loadStoryMessages, replaceStoryMessages, resolveActiveStorySchemes, type StoryCharacterSettings, type StoryGlobalSettings, type StoryMessage } from "./story-storage";
 import type { ChatMessage } from "./chat-storage";
+import { loadChatSessions } from "./chat-storage";
+import { buildOfflineStoryDigest } from "./chat-offline-storage";
 import { MacroEngine } from "./macro-engine";
 import { formatCharacterRelationsForPrompt } from "./character-world-storage";
 import { formatPromptTimestamp } from "./prompt-time";
@@ -455,6 +457,17 @@ async function buildStoryPromptMessages(
   if (settingsPrompt) messages.push({ role: "system", content: settingsPrompt });
   if (!independent && settings?.floatingPhoneInContext && floatingChatContext?.trim()) {
     messages.push({ role: "system", content: `# 悬浮小手机最近线上聊天\n以下记录用于衔接线上与线下剧情，不要逐字复述：\n${floatingChatContext.trim()}` });
+  }
+  // 反向同步：聊天室的线上/线下进展也进入剧情提示词，形成同一份记忆。
+  if (!independent) {
+    const chatSession = loadChatSessions().find(item => !item.isGroup && item.contactId === characterId);
+    const chatDigest = chatSession ? buildOfflineStoryDigest(chatSession.id, 2) : "";
+    if (chatDigest) {
+      messages.push({
+        role: "system",
+        content: `# 聊天室最近发生的事\n以下是你和用户在聊天室（线上/线下）真实发生过的事，你记得它们；剧情里不要反问“什么聊天/之前怎么了”，也不要逐字复述。\n${chatDigest}`,
+      });
+    }
   }
   messages.push({ role: "system", content: buildStoryBodyFormatPrompt(settings) });
   return messages;

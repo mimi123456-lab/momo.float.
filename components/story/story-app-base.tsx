@@ -56,6 +56,7 @@ import { Avatar } from "@/components/ui/primitives";
 import { StoryHtmlRenderer, type StoryVoiceSegment } from "@/components/ui/story-html-renderer";
 import { StorySettingsPage, STORY_DEFAULT_STATUS_RENDER, STORY_DEFAULT_THEATER_RENDER } from "@/components/story/story-settings-page";
 import { loadCharacters } from "@/lib/character-storage";
+import { recordStorySyncEvent, backfillStorySync } from "@/lib/story-chat-sync";
 import { maybeRunSummarization, runSummarizationPipeline } from "@/lib/memory-summarizer";
 import { incrementEventCounter } from "@/lib/memory-storage";
 import { loadBindingConfig, loadPresets, resolveBinding, resolveUserIdentity } from "@/lib/settings-storage";
@@ -1677,6 +1678,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
     });
     setMessages((prev) => [...prev, userMessage]);
     setStorageVersion((value) => value + 1);
+    // 实时同步给聊天室：线上/线下的下一条消息就能知道剧情刚发生了什么
+    recordStorySyncEvent(characterId, "user", userText);
     markGenerating(sessionId, true);
     const generationRun = createStoryGenerationRun(sessionId);
     const generationRunId = generationRun.runId;
@@ -1713,6 +1716,8 @@ export function StoryApp({ onClose }: StoryAppProps) {
         setMessages(loadStoryMessages(sessionId)); // 按会话从存储重读，杜绝跨会话串消息
       }
       setStorageVersion((value) => value + 1);
+      // 共享记忆：一条剧情正文压成一条事件，聊天室线上/线下立即读取
+      recordStorySyncEvent(characterId, "assistant", result.renderedText || result.rawText || result.storySummary || "");
 
       const memoryCharacterIds = currentSession?.participantIds?.length ? currentSession.participantIds : [characterId];
       const storyCharacters = memoryCharacterIds
@@ -1751,6 +1756,13 @@ export function StoryApp({ onClose }: StoryAppProps) {
       }
     }
   }
+
+  // 老剧情回填：同步功能上线前已有的会话，打开时补最近几条，线上立刻能接上。
+  useEffect(() => {
+    if (!ready || !activeSessionId || !activeCharacterId) return;
+    const recentMessages = loadStoryMessages(activeSessionId).slice(-8);
+    if (recentMessages.length > 0) backfillStorySync(activeCharacterId, recentMessages);
+  }, [ready, activeSessionId, activeCharacterId]);
 
   // 私聊邀请/快捷新分线进入后，由角色直接开场；提示只参与本次生成，不渲染成用户气泡。
   useEffect(() => {
