@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useMemo, memo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, memo, type MouseEvent as ReactMouseEvent } from "react";
 import { findCustomStickerByName, resolveCustomStickerUrl } from "@/lib/custom-sticker-storage";
 import { isMediaStoreRef, loadMediaObjectUrl } from "@/lib/media-cache-storage";
 import { getChatImageFromIndexedDB } from "@/lib/chat-asset-storage";
@@ -2624,12 +2624,25 @@ function LinkShareBubble({ msg }: { msg: ChatMessage }) {
     const title = data?.linkTitle || "分享的内容";
     const desc = data?.linkDesc || "";
     const cover = data?.linkCover || "";
+    const url = data?.linkUrl || "";
+    const openLink = (event: ReactMouseEvent) => {
+        event.stopPropagation();
+        if (!url) return;
+        const shell = (window as unknown as { AndroidShell?: { openUrl?: (target: string) => boolean } }).AndroidShell;
+        if (shell?.openUrl?.(url)) return;
+        window.open(url, "_blank", "noopener,noreferrer");
+    };
 
     return (
         <div className="chat-xhs-share-card">
             <div className="chat-xhs-share-head">
                 <span className="chat-xhs-share-mark">{mark}</span>
                 <span>{label}</span>
+                {url ? (
+                    <button type="button" className="chat-xhs-share-open" onClick={openLink}>
+                        打开原文 ↗
+                    </button>
+                ) : null}
             </div>
             <div className="chat-xhs-share-body">
                 <div className={`chat-xhs-share-cover chat-xhs-share-cover--${tone}`}>

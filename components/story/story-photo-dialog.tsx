@@ -80,7 +80,7 @@ export function StoryPhotoDialog({ sessionId, characterId, messages, onClose, on
         setBusy(true);
         setError("");
         try {
-            const generated = await generateStoryPhotoData({ characterId, description });
+            const generated = await generateStoryPhotoData({ characterId, description, subject: kind });
             if (!generated) throw new Error("生图未配置或生成失败");
             const message = pushStoryMessage({
                 sessionId,
@@ -111,9 +111,13 @@ export function StoryPhotoDialog({ sessionId, characterId, messages, onClose, on
         setRegenerating(true);
         setError("");
         try {
-            const generated = await generateStoryPhotoData({ characterId, description });
-            if (!generated) throw new Error("生图未配置或生成失败");
             const target = photos[editing.index];
+            const generated = await generateStoryPhotoData({
+                characterId,
+                description,
+                subject: target?.kind ?? kind,
+            });
+            if (!generated) throw new Error("生图未配置或生成失败");
             if (target) {
                 replaceStoryPhotoMessage({
                     sessionId,

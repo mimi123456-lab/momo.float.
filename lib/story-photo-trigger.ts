@@ -34,17 +34,55 @@ export function extractStoryPhotoRequest(text: string): StoryPhotoTrigger {
     return { text: source.replace(PHOTO_MARKER, "").trim(), description };
 }
 
+export type StoryPhotoSubject = "character" | "user" | "couple" | "scenery";
+
+/**
+ * 从画面描述判断主角是谁。
+ * 关键词有优先级：合照 > 用户 > 她自己 > 默认角色。
+ * 注意不能把「她」直接当成自拍——剧情叙述里「她举起手机拍你」很常见。
+ */
+export function detectStoryPhotoSubject(description: string): StoryPhotoSubject {
+    const text = description.replace(/\s+/g, "");
+    if (/(风景|空镜|景色|没有人|只有景|拍风景|只拍景)/.test(text) && !/(你|她|我们|合照)/.test(text)) {
+        return "scenery";
+    }
+    if (/(合照|合影|两个人|双人|同框|我俩|我们俩|我们两个|一起拍|一起照|拉着你|拉上你|和你拍)/.test(text)) {
+        return "couple";
+    }
+    if (/(给你(拍|照)|拍下?了?你|拍你|你的照片|只拍你|抓拍你|偷拍你|用户|对方)/.test(text)) {
+        return "user";
+    }
+    if (/(自拍|拍自己|拍她自己|她的单人|只拍她|她自己|她的照片|拍她)/.test(text)) {
+        return "character";
+    }
+    return "character";
+}
+
+/** 根据主角补充硬性画面约束，避免「给用户拍的照片」画成角色本人。 */
+function photoSubjectInstruction(subject: StoryPhotoSubject): string {
+    if (subject === "couple") {
+        return "【画面主体】这张是合照：画面中必须同时出现她和用户两个人，两个不同人物，双人正脸清晰、比例正常，不要只画一个人，也不要混脸。";
+    }
+    if (subject === "user") {
+        return "【画面主体】这张是她给用户拍的照片：画面中只出现用户一个人，她本人不在画面里。请严格按用户参考图还原用户的五官与性别，不要画成角色的样子。";
+    }
+    if (subject === "scenery") {
+        return "【画面主体】这张只拍场景本身：不要出现任何人物，不要画她，也不要画用户。";
+    }
+    return "【画面主体】这张是她的照片：画面中只出现她一个人，按角色参考图保持五官一致。";
+}
+
 /** 根据描述判断要不要带角色/用户参考图锁脸。 */
 export function resolveStoryPhotoReferences(description: string): {
+    subject: StoryPhotoSubject;
     useReferenceImage: boolean;
     includeUserReferenceImage: boolean;
 } {
-    const couple = /(合照|合影|两个人|双人|同框|我们|一起)/.test(description);
-    const userOnly = /(你|用户|对方)/.test(description);
-    const self = /(她|自己|自拍)/.test(description);
+    const subject = detectStoryPhotoSubject(description);
     return {
-        useReferenceImage: couple || self,
-        includeUserReferenceImage: couple || userOnly,
+        subject,
+        useReferenceImage: subject === "character" || subject === "couple",
+        includeUserReferenceImage: subject === "user" || subject === "couple",
     };
 }
 
@@ -63,13 +101,21 @@ function escapeHtml(value: string): string {
 export async function generateStoryPhotoData(params: {
     characterId: string;
     description: string;
+    /** 手动拍照时由页签直接指定主角，避免上下文里出现「她/你」导致判断反转。 */
+    subject?: StoryPhotoSubject;
     signal?: AbortSignal;
 }): Promise<{ dataUrl: string; description: string } | null> {
     const description = params.description.trim();
     if (!description) return null;
-    const references = resolveStoryPhotoReferences(description);
+    const subject = params.subject ?? detectStoryPhotoSubject(description);
+    const references = {
+        useReferenceImage: subject === "character" || subject === "couple",
+        includeUserReferenceImage: subject === "user" || subject === "couple",
+    };
+    // 内存里仍保存原始描述；只把主体约束附加给生图模型。
+    const imageDescription = `${description}\n\n${photoSubjectInstruction(subject)}`;
     const generated = await generateImageFromConfiguredApi({
-        description,
+        description: imageDescription,
         characterId: params.characterId,
         appId: "story",
         useReferenceImage: references.useReferenceImage,

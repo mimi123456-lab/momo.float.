@@ -951,7 +951,9 @@ export async function generateImageFromConfiguredApi(params: {
       label: "角色参考",
     });
   }
-  const activeAnchors = (reference?.anchors || []).filter(anchor => anchor.enabled !== false);
+  // 角色锚点只在「本次要画角色」时参与；否则「给用户拍的单人照」会被角色特征带偏，
+  // 出现明明选了用户、出来却是角色的情况。
+  const activeAnchors = shouldUseReference ? (reference?.anchors || []).filter(anchor => anchor.enabled !== false) : [];
   for (const anchor of activeAnchors) {
     if (!anchor.assetId) continue;
     const raw = await getChatImageFromIndexedDB(anchor.assetId);
@@ -971,13 +973,15 @@ export async function generateImageFromConfiguredApi(params: {
   throwIfAborted(params.signal);
   const referenceImageDataUrl = await combineReferenceImagesForEdit(referenceInputs);
   throwIfAborted(params.signal);
-  const characterPrompt = reference?.featurePrompt?.trim() || "";
+  const characterPrompt = shouldUseReference ? (reference?.featurePrompt?.trim() || "") : "";
   const anchorsPrompt = activeAnchors
     .filter(anchor => anchor.description.trim())
     .map(anchor => `${anchor.name || "特征"}：${anchor.description.trim()}`)
     .join("；");
   const userPrompt = includeUserReference && userIdentity
-    ? `【用户身份参考】${userIdentity.name}${userIdentity.gender && userIdentity.gender !== "保密" ? `，${userIdentity.gender}` : ""}。合照中必须保持用户与角色是两个不同人物，不得混脸。`
+    ? shouldUseReference
+      ? `【用户身份参考】${userIdentity.name}${userIdentity.gender && userIdentity.gender !== "保密" ? `，${userIdentity.gender}` : ""}。合照中必须保持用户与角色是两个不同人物，不得混脸。`
+      : `【用户身份参考】${userIdentity.name}${userIdentity.gender && userIdentity.gender !== "保密" ? `，${userIdentity.gender}` : ""}。这张画面只出现用户本人，请按参考图还原用户五官，不要画成角色本人。`
     : "";
   const prompt = mergePrompt(
     [
