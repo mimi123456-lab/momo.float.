@@ -37,7 +37,7 @@ function bumpWatchAutoCount(): void {
   } catch { /* 存不下就不计数，不影响观看 */ }
 }
 
-type Props = { onClose: () => void; onNotice?: (message: string) => void };
+type Props = { onClose: () => void; onNotice?: (message: string) => void; initialUrl?: string };
 type Platform = "bilibili" | "youtube" | "tencent" | "youku" | "iqiyi" | "douyin" | "kuaishou" | "xiaohongshu" | "other";
 type VideoTarget = { url: string; embedUrl: string | null; platform: Platform; platformName: string; supported: boolean; nativeVideo?: boolean; nativeVideoUrl?: string; nativeCacheId?: string };
 type WatchNativeBridge = { resolveShortVideoShareUrl?: (url: string, requestId: string) => boolean; deleteCachedShortVideo?: (cacheId: string) => boolean; setScreenOrientation?: (mode: string) => boolean; openUrl?: (url: string) => boolean; getWebConsoleLogs?: () => string; getDiagnosticsSnapshot?: () => string; clearWebConsoleLogs?: () => boolean };
@@ -221,7 +221,7 @@ function saveTargetComments(url: string, comments: WatchComment[]): void {
   kvSet(COMMENTS_KEY,JSON.stringify(store));
 }
 
-export function WatchTogetherApp({ onClose, onNotice }: Props) {
+export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
   // Android WebView/IME: visualViewport 通常比 100dvh 更早反映软键盘后的可视区域。
   useEffect(() => {
     const root = watchRootRef.current;
@@ -1111,6 +1111,18 @@ export function WatchTogetherApp({ onClose, onNotice }: Props) {
     if (!parsed.supported && (parsed.platform === "xiaohongshu" || parsed.platform === "douyin")) onNotice?.("正在尝试在小手机内解析" + parsed.platformName + "的公开视频流；如果平台要求登录或启用了防盗链，解析可能失败。");
   };
 
+
+  // 从聊天链接卡「一起看」带链接进来：自动填入并开始播放（同一个链接只触发一次）。
+  const initialUrlHandledRef = useRef("");
+  useEffect(() => {
+    const url = (initialUrl || "").trim();
+    if (!url || url === initialUrlHandledRef.current) return;
+    initialUrlHandledRef.current = url;
+    setUrlInput(url);
+    void openVideo(url);
+    // openVideo 每次渲染都会重建；用 ref 去重，避免反复重播。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialUrl]);
 
   /** Request timestamped JSON from the user's own local/self-hosted transcription service. */
   const transcribeFromUrl = async () => {

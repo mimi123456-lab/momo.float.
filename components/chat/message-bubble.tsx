@@ -2639,9 +2639,23 @@ function LinkShareBubble({ msg }: { msg: ChatMessage }) {
                 <span className="chat-xhs-share-mark">{mark}</span>
                 <span>{label}</span>
                 {url ? (
-                    <button type="button" className="chat-xhs-share-open" onClick={openLink}>
-                        打开原文 ↗
-                    </button>
+                    <span className="chat-xhs-share-actions">
+                        {platform && platform !== "web" ? (
+                            <button
+                                type="button"
+                                className="chat-xhs-share-watch"
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    window.dispatchEvent(new CustomEvent("watch-together-open", { detail: { url } }));
+                                }}
+                            >
+                                一起看
+                            </button>
+                        ) : null}
+                        <button type="button" className="chat-xhs-share-open" onClick={openLink}>
+                            打开原文 ↗
+                        </button>
+                    </span>
                 ) : null}
             </div>
             <div className="chat-xhs-share-body">

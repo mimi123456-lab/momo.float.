@@ -1096,6 +1096,7 @@ export function DesktopShell({ initialThemeProfile, initialThemeAssets }: Deskto
   const [shoppingMounted, setShoppingMounted] = useState(false);
   const [shoppingBusy, setShoppingBusy] = useState(false);
   const [watchTogetherMounted, setWatchTogetherMounted] = useState(false);
+  const [watchInitialUrl, setWatchInitialUrl] = useState("");
   if (activeApp === "dwelling" && !dwellingMounted) setDwellingMounted(true);
   if (activeApp === "xiaohongshu" && !xiaohongshuMounted) setXiaohongshuMounted(true);
   if (activeApp === "shopping" && !shoppingMounted) setShoppingMounted(true);
@@ -2438,6 +2439,19 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
     };
     window.addEventListener("open-app", handler);
     return () => window.removeEventListener("open-app", handler);
+  }, []);
+
+  // 聊天里的链接卡「一起看」：直接打开一起看并带入链接。
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const url = (event as CustomEvent<{ url?: string }>).detail?.url?.trim();
+      if (!url) return;
+      setWatchInitialUrl(url);
+      setWatchTogetherMounted(true);
+      setActiveApp("watchtogether");
+    };
+    window.addEventListener("watch-together-open", handler);
+    return () => window.removeEventListener("watch-together-open", handler);
   }, []);
 
   // Mini chat window state
@@ -4815,9 +4829,11 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#121110;color:rgb
                 {watchTogetherMounted && (
                   <section className="phone-app-pane" style={activeApp !== "watchtogether" ? { display: "none" } : undefined}>
                     <WatchTogetherApp
+                      initialUrl={watchInitialUrl}
                       onClose={() => {
                         setActiveApp(null);
                         setWatchTogetherMounted(false);
+                        setWatchInitialUrl("");
                       }}
                       onNotice={setNotice}
                     />
