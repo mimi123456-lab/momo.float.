@@ -46,13 +46,13 @@ export function detectStoryPhotoSubject(description: string): StoryPhotoSubject 
     if (/(风景|空镜|景色|没有人|只有景|拍风景|只拍景)/.test(text) && !/(你|她|我们|合照)/.test(text)) {
         return "scenery";
     }
-    if (/(合照|合影|两个人|双人|同框|我俩|我们俩|我们两个|一起拍|一起照|拉着你|拉上你|和你拍)/.test(text)) {
+    if (/(合照|合影|两个人|双人|同框|我俩|我们俩|我们两个|你和我|我和你|你我|一起拍|一起照|拉着你|拉上你|和你拍)/.test(text)) {
         return "couple";
     }
-    if (/(给你(拍|照)|拍下?了?你|拍你|你的照片|只拍你|抓拍你|偷拍你|用户|对方)/.test(text)) {
+    if (/(给你(拍|照)|拍下?了?你|拍你|你的照片|只拍你|只有你|抓拍你|偷拍你|给我拍|拍的我|我的照片|只拍用户|只有用户|用户一个人|对方)/.test(text)) {
         return "user";
     }
-    if (/(自拍|拍自己|拍她自己|她的单人|只拍她|她自己|她的照片|拍她)/.test(text)) {
+    if (/(自拍|拍自己|拍她自己|她的单人|只拍她|她自己|她的照片|拍她|只有她|她一个人|她单人|只有我|我一个人)/.test(text)) {
         return "character";
     }
     return "character";
