@@ -2254,10 +2254,10 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
     </main>
 
     {showSettings && <div className="absolute inset-0 z-[1012] flex items-stretch bg-black/55 backdrop-blur-sm" onClick={() => setShowSettings(false)}>
-      <section className="h-full max-h-none w-full overflow-y-auto border-0 bg-[#2a211a] p-4 pb-[max(16px,env(safe-area-inset-bottom))]" onClick={event => event.stopPropagation()}>
+      <section className="h-full max-h-none w-full overflow-y-auto border-0 bg-[#2a211a] p-4 pb-[max(16px,env(safe-area-inset-bottom))]" style={{ paddingTop: "max(48px, env(safe-area-inset-top))" }} onClick={event => event.stopPropagation()}>
           <div className="flex items-center justify-between">
             <h2 className="font-serif text-base tracking-wide text-[#efe2d0]">陪看方式</h2>
-            <button onClick={() => setShowSettings(false)} aria-label="收起设置" className="text-[#8b8077]"><X size={15}/></button>
+            <button onClick={() => setShowSettings(false)} aria-label="收起设置" className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/6 text-[#b9aca0] active:bg-white/12"><X size={19}/></button>
           </div>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <label className="text-[11px] text-[#9c9086]">陪你看的人
@@ -2282,7 +2282,8 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
             >{label}</button>)}
           </div>
           <section className="mt-4 border-t border-white/10 pt-3">
-            <h3 className="font-serif text-sm text-[#e8c39a]">联网资料获取</h3>
+            <details>
+            <summary className="cursor-pointer font-serif text-sm text-[#e8c39a] marker:content-none">联网资料获取 <span className="text-[10px] font-sans text-[#8b8077]">（高级 · 点击展开）</span></summary>
             <p className="mt-1 text-[10px] leading-5 text-[#8b8077]">独立的数据获取步骤：先尝试读取公开页面元数据，再按配置提取正文或搜索背景；结果只作为参考资料传给角色 AI，不替代截图视觉理解。Tavily 可直接配置，自定义接口需遵循下方请求格式。</p>
             <label className="mt-2 block text-[11px] text-[#9c9086]">资料来源
               <select value={watchContextSettings.provider} onChange={event => setWatchContextSettings(value => ({...value, provider:event.target.value as WatchContextSettings["provider"]}))} className="mt-1 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-[#efe2d0] outline-none">
@@ -2307,9 +2308,11 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
               videoBackgroundRequestedRef.current.delete(target.url);
               void lookupVideoBackground(target.url, videoTitle || target.platformName + "视频");
             }} className="mt-2 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-[11px] text-[#d8c9b6] disabled:opacity-40">重新获取当前视频资料</button>
+            </details>
           </section>
           <section className="mt-4 border-t border-white/10 pt-3">
-            <h3 className="font-serif text-sm text-[#e8c39a]">视频解析与本地缓存</h3>
+            <details>
+             <summary className="cursor-pointer font-serif text-sm text-[#e8c39a] marker:content-none">视频解析与本地缓存 <span className="text-[10px] font-sans text-[#8b8077]">（高级 · 点击展开）</span></summary>
              <p className="mt-1 text-[10px] leading-5 text-[#8b8077]">目前支持的平台只有两个：小红书（含 xhslink 短链，站内解析、免登录、缓存到本机）和 B 站（BV 号走官方播放器；需要直连流时由下方外部解析服务下载）。抖音、快手已确认无法直接解析——它们要求浏览器 JS 现场生成的请求签名，服务端算不出来，贴 Cookies 也无效，请先在 App 里把视频保存到相册，再用「选择本地视频」。直链 / 本地文件无需解析。缓存长期保留——同一链接下次秒开、长视频自动续播；仅超过总容量上限（默认 4 GB）才按最久未看清理。删除单条缓存请到「观看记录」对应卡片。</p>
              <button type="button" onClick={async () => { try { const res = await fetch("/api/watch-resolver/cache", { method: "DELETE" }); const result = await res.json() as { ok?: boolean; removed?: number }; setLocalResolverStatus(result.ok ? `已清空站内缓存（${result.removed ?? 0} 个文件）。` : "清空失败：" + (result as { error?: string }).error); } catch (error) { setLocalResolverStatus("清空失败：" + (error instanceof Error ? error.message : String(error))); } }} className="mt-2 w-full rounded-xl border border-[#c99a6a]/60 bg-[#c99a6a]/15 px-3 py-2.5 text-xs font-medium text-[#f0d5b8]">清空全部站内缓存</button>
              <p className="mt-3 text-[10px] font-medium tracking-wide text-[#c9a887]">外部解析服务（可选 · Termux / 电脑 Python）——纯标准库实现，Android 上不需要编译，一条命令装好；主要用于 B 站这类需要 yt-dlp 的站点：</p>
@@ -2346,6 +2349,7 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
             </div>
             {localResolverStatus && <p role="status" aria-live="polite" className="mt-2 break-words text-[10px] leading-5 text-[#e6c49d]">{localResolverStatus}</p>}
             <button type="button" disabled={!localResolverJobRef.current} onClick={async () => { const job = localResolverJobRef.current; if (!job) return; try { const url = job.builtin ? "/api/watch-resolver/video/" + encodeURIComponent(job.id) : job.endpoint + "/api/videos/" + encodeURIComponent(job.id); await fetch(url, { method: "DELETE", headers: job.token ? { "X-Resolver-Token": job.token } : {} }); setLocalResolverStatus("已删除本次本地缓存；下次播放同一链接会重新下载。"); localResolverJobRef.current = null; } catch { setLocalResolverStatus("清理请求失败，请在服务端按缓存策略清理"); } }} className="mt-2 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-[11px] text-[#d8c9b6] disabled:opacity-40">删除本次本地缓存</button>
+            </details>
           </section>
           <section className="mt-4 border-t border-white/10 pt-3">
             <h3 className="font-serif text-sm text-[#e8c39a]">视频理解模型</h3>
