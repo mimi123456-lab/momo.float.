@@ -192,12 +192,47 @@ export function extractDouyinVideo(html: string): { directUrl: string; title: st
   return { directUrl, title };
 }
 
+export type XhsNote = { title: string; desc: string; images: string[]; author: string };
+
+function decodeJsonString(raw: string): string {
+  try { return JSON.parse('"' + raw + '"') as string; } catch { return raw.replace(/\\u002F/gi, "/").replace(/\\\//g, "/"); }
+}
+
+/** 图文笔记没有视频直链，单独提取标题、正文、作者和配图，供一起看当“图文卡片”用。 */
+export function extractXiaohongshuNote(html: string): XhsNote | null {
+  const title = (decodeJsonString(/"title"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(html)?.[1] ?? "")
+    || /<meta\s+name="og:title"\s+content="([^"]*)"/.exec(html)?.[1]
+    || /<title[^>]*>([^<]*)</.exec(html)?.[1]
+    || "").replace(/_小红书.*$/, "").trim();
+  const desc = (decodeJsonString(/"desc"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(html)?.[1] ?? "")
+    || /<meta\s+name="og:description"\s+content="([^"]*)"/.exec(html)?.[1]
+    || "").trim();
+  const author = decodeJsonString(/"nickname"\s*:\s*"((?:[^"\\]|\\.)*)"/.exec(html)?.[1] ?? "").trim();
+  const images: string[] = [];
+  const seen = new Set<string>();
+  for (const match of html.matchAll(/"(?:urlDefault|urlPre|originalUrl)"\s*:\s*"((?:[^"\\]|\\.)*)"/g)) {
+    const url = decodeJsonString(match[1]).replace(/\\u002F/gi, "/");
+    if (!/^https?:\/\//.test(url) || !/xhscdn\.com/i.test(url)) continue;
+    if (!/(sns-webpic|sns-img|sns-webpic-qc)/i.test(url)) continue;
+    if (seen.has(url)) continue;
+    seen.add(url);
+    images.push(url);
+    if (images.length >= 9) break;
+  }
+  if (!desc && images.length === 0) return null;
+  return { title: title || "小红书笔记", desc, images, author };
+}
+
 export type BuiltInResolveResult = {
   id: string;
   cacheHit: boolean;
   title: string;
   size: number;
   downloadUrl: string;
+  kind?: "video" | "note";
+  desc?: string;
+  images?: string[];
+  author?: string;
 };
 
 /**
@@ -235,6 +270,13 @@ export async function resolveAndCache(videoUrl: string): Promise<BuiltInResolveR
   const html = await pageRes.text();
   const extracted = isXhs ? extractXiaohongshuVideo(html) : extractDouyinVideo(html);
   if (!extracted) {
+    // 小红书图文笔记没有视频流：不当作失败，返回正文和配图，由前端展示成图文卡片。
+    if (isXhs) {
+      const note = extractXiaohongshuNote(html);
+      if (note) {
+        return { id, cacheHit: false, title: note.title, size: 0, downloadUrl: "", kind: "note", desc: note.desc, images: note.images, author: note.author };
+      }
+    }
     throw new Error(isXhs
       ? "未能从小红书页面提取到视频直链（笔记可能已被删除或需要登录）"
       : "抖音解析失败：分享页可能要求登录或被风控，请改用 APK 原生解析或本地视频");
