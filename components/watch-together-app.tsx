@@ -2289,10 +2289,10 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
     </main>
 
     {showSettings && <div className="absolute inset-0 z-[1012] flex items-stretch bg-black/55 backdrop-blur-sm" onClick={() => setShowSettings(false)}>
-      <section className="h-full max-h-none w-full overflow-y-auto border-0 bg-[#2a211a] p-4 pb-[max(16px,env(safe-area-inset-bottom))]" style={{ paddingTop: "max(48px, env(safe-area-inset-top))" }} onClick={event => event.stopPropagation()}>
+      <section className="h-full max-h-none w-[92%] max-w-[440px] overflow-y-auto border-0 bg-[#2a211a] p-4 pb-[max(16px,env(safe-area-inset-bottom))]" style={{ paddingTop: "max(56px, env(safe-area-inset-top))" }} onClick={event => event.stopPropagation()}>
           <div className="flex items-center justify-between">
             <h2 className="font-serif text-base tracking-wide text-[#efe2d0]">陪看方式</h2>
-            <button onClick={() => setShowSettings(false)} aria-label="收起设置" className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/6 text-[#b9aca0] active:bg-white/12"><X size={19}/></button>
+            <button onClick={() => setShowSettings(false)} aria-label="收起设置" className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-white/8 text-[#cbbdb0] active:bg-white/15"><X size={21}/></button>
           </div>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <label className="text-[11px] text-[#9c9086]">陪你看的人
@@ -2464,6 +2464,7 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
             </div>}
           </section>
           <p className="mt-3 text-[10px] leading-5 text-[#7d7268]">角色发言使用你已配置的聊天模型与语音绑定。平台自带的字幕/弹幕开关无法跨站控制，这里的开关只作用于「角色陪看」这一层。</p>
+          <button type="button" onClick={() => setShowSettings(false)} className="mt-5 w-full rounded-xl border border-[#c99a6a]/50 bg-[#c99a6a]/15 px-3 py-3 text-xs font-medium text-[#f0d5b8] active:bg-[#c99a6a]/25">关闭设置</button>
       </section>
     </div>}
 
