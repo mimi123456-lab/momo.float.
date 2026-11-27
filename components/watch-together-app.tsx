@@ -2029,6 +2029,7 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
       <button type="button" onClick={() => setShowVideoSourcePanel(value => !value)} className="watch-capsule-button"><ExternalLink size={17}/><small>选择视频</small></button>
       <button type="button" onClick={() => setShowMemoryRecords(true)} className="watch-capsule-button"><FileText size={17}/><small>观看记录</small></button>
       <button type="button" onClick={() => setShowSettings(true)} className="watch-capsule-button"><Settings2 size={17}/><small>设置</small></button>
+      <button type="button" onClick={onClose} className="watch-capsule-button" aria-label="退出一起看"><X size={17}/><small>退出</small></button>
       <button type="button" onClick={() => setShowControlCapsule(value => !value)} className="watch-capsule-toggle" aria-label={showControlCapsule ? "收起入口栏" : "展开入口栏"}><ChevronDown size={15} className={showControlCapsule ? "" : "rotate-180"}/></button>
     </nav>
 
