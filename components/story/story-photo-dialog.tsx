@@ -40,16 +40,25 @@ function clip(value: string, limit: number): string {
 }
 
 function buildContext(messages: StoryMessage[]): string {
-    const parts = messages
+    const parts: string[] = [];
+    // 状态栏里通常有地点/穿搭/心情，只用于拍照取景，不写入同步记忆。
+    const lastAssistant = [...messages].reverse().find(message => message.role === "assistant");
+    const statusMatch = /\[状态栏\]([\s\S]*?)\[\/状态栏\]/.exec(lastAssistant?.rawContent || "");
+    if (statusMatch) {
+        const status = clip(statusMatch[1].replace(/[#*_>`]/g, " "), 180);
+        if (status) parts.push("当前状态（地点/穿搭/心情）：" + status);
+    }
+    const recent = messages
         .slice(-6)
         .filter(message => message.role === "user" || message.role === "assistant")
         .map(message => cleanStorySyncText(message.rawContent))
         .filter(Boolean)
         .map(text => clip(text, 220));
+    if (recent.length > 0) parts.push("最近剧情与正在发生的事：\n" + recent.join("\n"));
     return parts.join("\n");
 }
 
-export function StoryPhotoDialog({ sessionId, characterId, messages, onClose, onGenerated }: Props) {
+export function StoryPhotoDialog({ sessionId, characterId, characterName, messages, onClose, onGenerated }: Props) {
     const initialContextRef = useRef<string>(buildContext(messages));
     const [context, setContext] = useState(initialContextRef.current);
     const [kind, setKind] = useState<StoryPhotoKind>("character");
@@ -158,7 +167,7 @@ export function StoryPhotoDialog({ sessionId, characterId, messages, onClose, on
         <div className="story-photo-overlay" role="dialog" aria-modal="true" onClick={onClose}>
             <div className="story-photo-dialog" onClick={event => event.stopPropagation()}>
                 <header className="story-photo-header">
-                    <strong>剧情拍照</strong>
+                    <strong>剧情拍照{characterName.trim() ? ` · ${characterName.trim()}` : ""}</strong>
                     <button type="button" onClick={onClose} aria-label="关闭">×</button>
                 </header>
                 <div className="story-photo-body">
