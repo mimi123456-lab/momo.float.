@@ -477,6 +477,7 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
   const [timepointDraft, setTimepointDraft] = useState("");
   const timepointDraftRef = useRef("");
   const [watching, setWatching] = useState(false);
+  const [showLocalPlayCue, setShowLocalPlayCue] = useState(false);
   const [busy, setBusy] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -1915,7 +1916,14 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
             </div>
           </div>
         ) : target?.nativeVideo ? (
-          <video key={target.nativeVideoUrl || target.url} src={target.nativeVideoUrl || target.url} controls playsInline onPlay={() => setWatching(true)} onPause={() => setWatching(false)} {...(target.nativeCacheId ? { crossOrigin: "anonymous" as const } : {})} onLoadedMetadata={event => { const v = event.currentTarget; const saved = readWatchResumeMap()[target.url]?.t ?? 0; if (saved > 15 && v.duration && saved < v.duration - 45) { v.currentTime = saved; if (resumeNoticeUrlRef.current !== target.url) { resumeNoticeUrlRef.current = target.url; onNotice?.("已恢复到上次播放位置，接着一起看。"); } } }} onTimeUpdate={event => { const v = event.currentTarget; const last = Number(v.dataset.lastSave ?? "0"); if (Math.abs(v.currentTime - last) >= 5) { v.dataset.lastSave = String(v.currentTime); saveWatchResumePosition(target.url, v.currentTime); } }} className="aspect-video w-full bg-black object-contain" onEnded={() => { setWatching(false); const cached = nativeVideoCacheRef.current; if (cached && cached.url === target.url) { try { (window as WatchNativeWindow).AndroidShell?.deleteCachedShortVideo?.(cached.cacheId); } catch { /* cache TTL fallback */ } nativeVideoCacheRef.current = null; } }} onError={() => { const cached = nativeVideoCacheRef.current; if (cached && cached.url === target.url) { try { (window as WatchNativeWindow).AndroidShell?.deleteCachedShortVideo?.(cached.cacheId); } catch { /* cache TTL fallback */ } nativeVideoCacheRef.current = null; } onNotice?.("视频无法在当前 WebView 播放，可能是格式、签名有效期或平台防盗链限制。"); }} />
+          <div className="relative w-full bg-black">
+          <video key={target.nativeVideoUrl || target.url} src={target.nativeVideoUrl || target.url} controls playsInline onPlay={() => { setWatching(true); setShowLocalPlayCue(false); }} onPause={() => setWatching(false)} {...(target.nativeCacheId ? { crossOrigin: "anonymous" as const } : {})} onLoadedMetadata={event => { const v = event.currentTarget; const saved = readWatchResumeMap()[target.url]?.t ?? 0; if (saved > 15 && v.duration && saved < v.duration - 45) { v.currentTime = saved; if (resumeNoticeUrlRef.current !== target.url) { resumeNoticeUrlRef.current = target.url; onNotice?.("已恢复到上次播放位置，接着一起看。"); } } if (v.paused) setShowLocalPlayCue(true); }} onTimeUpdate={event => { const v = event.currentTarget; const last = Number(v.dataset.lastSave ?? "0"); if (Math.abs(v.currentTime - last) >= 5) { v.dataset.lastSave = String(v.currentTime); saveWatchResumePosition(target.url, v.currentTime); } }} className="aspect-video w-full bg-black object-contain" onEnded={() => { setWatching(false); const cached = nativeVideoCacheRef.current; if (cached && cached.url === target.url) { try { (window as WatchNativeWindow).AndroidShell?.deleteCachedShortVideo?.(cached.cacheId); } catch { /* cache TTL fallback */ } nativeVideoCacheRef.current = null; } }} onError={() => { const cached = nativeVideoCacheRef.current; if (cached && cached.url === target.url) { try { (window as WatchNativeWindow).AndroidShell?.deleteCachedShortVideo?.(cached.cacheId); } catch { /* cache TTL fallback */ } nativeVideoCacheRef.current = null; } onNotice?.("视频无法在当前 WebView 播放，可能是格式、签名有效期或平台防盗链限制。"); }} />
+          {showLocalPlayCue ? (
+            <button type="button" aria-label="播放视频" onClick={() => { const el = playerRef.current?.querySelector("video"); if (el) void el.play().catch(() => {}); }} className="absolute inset-0 z-10 grid place-items-center bg-black/30">
+              <span className="grid h-16 w-16 place-items-center rounded-full bg-[#fff8ee]/95 text-[#3d2c20] shadow-[0_10px_30px_rgba(0,0,0,.45)]"><Play size={26} className="ml-1" fill="currentColor"/></span>
+            </button>
+          ) : null}
+          </div>
         ) : target?.embedUrl ? (
           <div className="relative aspect-video w-full overflow-hidden bg-black">
             <iframe
@@ -2228,7 +2236,7 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
             <button type="button" onClick={() => {
               const native = (window as WatchNativeWindow).AndroidShell;
               const video = playerRef.current?.querySelector("video");
-              const safeUrl = (() => { try { const u = new URL(target?.url || window.location.href); return u.origin + u.pathname; } catch { return "unavailable"; } })();
+              const safeUrl = (() => { const raw = target?.url || window.location.href; if (raw.startsWith("blob:")) return "本地文件（blob 临时地址，刷新后失效）"; try { const u = new URL(raw); return u.origin + u.pathname; } catch { return "unavailable"; } })();
               let shell = "非 AndroidShell WebView 或原生诊断桥不可用";
               let logs: string[] = [];
               try { if (native?.getDiagnosticsSnapshot) shell = native.getDiagnosticsSnapshot(); } catch (error) { shell = "读取原生环境失败：" + String(error); }
