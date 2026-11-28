@@ -478,6 +478,7 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
   const timepointDraftRef = useRef("");
   const [watching, setWatching] = useState(false);
   const [showLocalPlayCue, setShowLocalPlayCue] = useState(false);
+  const [replyError, setReplyError] = useState("");
   const [busy, setBusy] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -1196,7 +1197,14 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
   }, []);
 
   const generateComment = useCallback(async (manual = false, momentOverride?: string, timepointOverride?: string, frameOverride?: string | Promise<string>) => {
-    if (!target || !character || commentBusyRef.current) return;
+    if (!character) {
+      const message = "还没有可回应的陪看角色，请先在「陪看方式」里选择角色。";
+      setReplyError(message);
+      onNotice?.(message);
+      return;
+    }
+    if (!target || commentBusyRef.current) return;
+    setReplyError("");
     commentBusyRef.current = true; setBusy(true);
     let queuedAfterReply: { moment: string; timepoint?: string; framePromise?: Promise<string> } | undefined;
     try {
@@ -1239,22 +1247,36 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
         "本轮由陪看触发器明确要求你发言，请输出一句自然的角色反应。",
       ].filter(Boolean).join("\n");
       const userMessage: ChatMessage = { id: `watch-${Date.now()}`, sessionId: session.id, role: "user", content: prompt, status: "sent", createdAt: new Date().toISOString() };
-      const result = await generateChatCompletion(session, [...history, userMessage], {
+      const requestOptions = (withImages: boolean) => ({
         appId: "watch_together",
         appTags: ["watch_together", "watch"],
         toolsAllowed: false,
-        attachedImages: frameDataUrl ? [frameDataUrl] : undefined,
+        attachedImages: withImages && frameDataUrl ? [frameDataUrl] : undefined,
       });
+      let result;
+      try {
+        result = await generateChatCompletion(session, [...history, userMessage], requestOptions(true));
+      } catch (firstError) {
+        // 多数纯文本聊天模型不接受图片附件；带截图失败时退回纯文字/字幕再试一次，
+        // 否则用户会看到「点了发送没反应」。
+        if (!frameDataUrl) throw firstError;
+        result = await generateChatCompletion(session, [...history, userMessage], requestOptions(false));
+        onNotice?.("当前聊天模型不接受画面附件，这一轮改用文字和字幕理解。");
+      }
       const responseText = flattenCompletionResult(result).trim().replace(/^["“]|["”]$/g, "") || "我刚刚看了这一段，感觉有些细节值得留意。你怎么看？";
       // Treat a screenshot as a one-shot visual hint; do not resend the same frame on every auto-comment.
       if (screenshotDataUrl) setScreenshotDataUrl("");
       const responseTimepoint = timepointOverride || formatVideoTime(transcriptSeconds);
+      setReplyError("");
       const comment: WatchComment = { id: `comment-${Date.now()}`, characterId: character.id, characterName: character.name, text: responseText, createdAt: new Date().toISOString(), kind: "character", timepoint: responseTimepoint, targetUrl: target.url };
       setComments(current => { const next = [...current.slice(-99), comment]; saveTargetComments(target.url, next); return next; });
       persistWatchShortTermMemory(character.id, character.name, videoTitle || target.platformName + "视频", responseText, "assistant");
       if (settings.voiceEnabled) void speakComment(responseText, character.id);
     } catch (error) {
-      onNotice?.("角色观影回应失败：" + (error instanceof Error ? error.message : String(error)));
+      const message = "角色观影回应失败：" + (error instanceof Error ? error.message : String(error));
+      setReplyError(message);
+      try { localStorage.setItem("watch_last_reply_error_v1", new Date().toISOString() + " " + message); } catch { /* local-only */ }
+      onNotice?.(message);
     } finally {
       commentBusyRef.current = false;
       setBusy(false);
@@ -2117,6 +2139,9 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
                 <textarea value={discussionDraft} onPointerDown={event=>event.stopPropagation()} onTouchStart={event=>event.stopPropagation()} onChange={event=>setDiscussionDraft(event.target.value.slice(0,800))} onKeyDown={event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();submitDiscussion();}}} maxLength={800} rows={1} placeholder={target ? "聊聊这一帧，收藏心动与只有你们懂的梗……" : "先选一段能在小手机内播放的视频，再开始聊"} className="h-9 min-h-[36px] max-h-[36px] min-w-0 flex-1 resize-none border-0 bg-transparent px-3 py-2 text-[13px] leading-5 text-[#594536] outline-none placeholder:text-[#aa9683]" style={{height:36,minHeight:36,maxHeight:36,overflowY:"hidden"}}/>
                 <button type="submit" disabled={!target||!discussionDraft.trim()} className="inline-flex h-9 shrink-0 items-center gap-1 rounded-full bg-[#9b6b4c] px-3.5 text-xs font-semibold text-white shadow-sm disabled:opacity-35"><MessageCircle size={13}/>发送</button>
               </form>
+              {replyError
+                ? <p role="alert" className="mt-1.5 break-words px-2 text-[10px] leading-5 text-[#e08a7a]">{replyError}</p>
+                : busy ? <p role="status" className="mt-1.5 px-2 text-[10px] leading-5 text-[#a07a5c]">角色正在回应…</p> : null}
             </div>
 
         </div>
@@ -2257,6 +2282,7 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
                 "可视区：" + window.innerWidth + "x" + window.innerHeight + " / DPR " + window.devicePixelRatio,
                 "内置 video：" + (video ? JSON.stringify({readyState:video.readyState,networkState:video.networkState,paused:video.paused,ended:video.ended,currentTime:Number.isFinite(video.currentTime)?Math.round(video.currentTime*10)/10:null,duration:Number.isFinite(video.duration)?video.duration:null,videoWidth:video.videoWidth,videoHeight:video.videoHeight,error:video.error?{code:video.error.code,message:video.error.message}:null}) : "无内置 video；跨域 iframe 内部状态不可读取"),
                 "原生环境：" + shell,
+                "最近回应错误：" + (() => { try { return localStorage.getItem("watch_last_reply_error_v1") || "无"; } catch { return "读取失败"; } })(),
                 "最近 WebView 控制台警告/错误：",
                 ...(logs.length ? logs : ["暂无可读取的控制台错误记录"]),
                 "提示：复制前请检查是否包含隐私信息。"
