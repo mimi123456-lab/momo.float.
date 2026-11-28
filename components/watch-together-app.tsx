@@ -10,10 +10,8 @@ import { appendCustomAppTimelineEntry, deleteCustomAppTimelineEntries } from "@/
 import { kvGet, kvSet } from "@/lib/kv-db";
 import { resolveVoiceConfig, synthesizeSpeech } from "@/lib/tts-service";
 import { resolveUserIdentity } from "@/lib/settings-storage";
-import { loadVideoAnalysisSettings, saveVideoAnalysisSettings, type VideoAnalysisSettings } from "@/lib/video-analysis-settings";
 import { formatTranscriptTime, parseVideoTranscript, type VideoTranscriptSegment } from "@/lib/video-transcript";
 import { captureScreenshot, hasScreenshotBridge } from "@/lib/screenshot";
-import { analyzeWholeVideoWithGemini } from "@/lib/gemini-video-understanding";
 
 /** 自动搭话的每日上限：护栏，避免暂停/挂机时白烧 API。 */
 const WATCH_AUTO_DAILY_LIMIT = 24;
@@ -311,10 +309,6 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
   });
   const [transcriberModel, setTranscriberModel] = useState<"tiny" | "base" | "small" | "medium">("small");
   const [transcribing, setTranscribing] = useState(false);
-  const [wholeVideoBusy, setWholeVideoBusy] = useState(false);
-  const [wholeVideoProgress, setWholeVideoProgress] = useState("");
-  const [videoAnalysisSettings, setVideoAnalysisSettings] = useState<VideoAnalysisSettings>(() => loadVideoAnalysisSettings());
-  const [videoUnderstandingEnabled, setVideoUnderstandingEnabled] = useState(() => { try { return typeof window !== "undefined" && window.localStorage.getItem("watch_video_understanding_enabled_v1") === "true"; } catch { return false; } });
   const [videoBackground, setVideoBackground] = useState<{ url: string; text: string } | null>(null);
   type WatchContextSettings = { provider: "auto" | "tavily" | "custom"; apiUrl: string; apiKey: string };
   const WATCH_CONTEXT_SETTINGS_KEY = "watch_context_provider_settings_v1";
@@ -327,11 +321,7 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
   });
   const [contextFetchStatus, setContextFetchStatus] = useState("");
   const videoBackgroundRequestedRef = useRef<Set<string>>(new Set());
-  const [videoModelOptions, setVideoModelOptions] = useState<string[]>([]);
-  const [videoModelBusy, setVideoModelBusy] = useState(false);
-  const [videoModelTestResult, setVideoModelTestResult] = useState("");
   const localVideoFileRef = useRef<File | null>(null);
-  const wholeVideoAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!target?.nativeVideoUrl || !target.nativeVideoUrl.toLowerCase().includes(".m3u8")) return;
@@ -520,7 +510,6 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
     });
   }, []);
   useEffect(() => { saveSettings(settings); }, [settings]);
-  useEffect(() => { saveVideoAnalysisSettings(videoAnalysisSettings); }, [videoAnalysisSettings]);
   useEffect(() => {
     const handleAppBack = (event: Event) => {
       const detail = (event as CustomEvent<{ handled?: boolean }>).detail;
@@ -731,62 +720,11 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     if (localVideoObjectUrlRef.current) URL.revokeObjectURL(localVideoObjectUrlRef.current);
     localVideoFileRef.current = null;
-    wholeVideoAbortRef.current?.abort();
     try { screen.orientation?.unlock?.(); } catch { /* orientation lock is optional */ }
   }, []);
 
 
   const patchSettings = (patch: Partial<WatchSettings>) => setSettings(current => ({ ...current, ...patch }));
-  const patchVideoAnalysisSettings = (patch: Partial<VideoAnalysisSettings>) => {
-    setVideoAnalysisSettings(current => {
-      const next = { ...current, ...patch };
-      if (patch.provider && patch.provider !== current.provider) {
-        const defaults: Record<VideoAnalysisSettings["provider"], { baseUrl: string; model: string }> = {
-          gemini: { baseUrl: "https://generativelanguage.googleapis.com", model: "gemini-2.5-flash" },
-          ark: { baseUrl: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-seed-1-6-vision-250815" },
-          "openai-compatible": { baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
-          anthropic: { baseUrl: "https://api.anthropic.com", model: "claude-3-7-sonnet-latest" },
-          twelvelabs: { baseUrl: "https://api.twelvelabs.io/v1.3", model: "pegasus1.2" },
-        };
-        next.baseUrl = defaults[patch.provider].baseUrl;
-        next.model = defaults[patch.provider].model;
-        setVideoModelOptions([]);
-        setVideoModelTestResult("");
-      }
-      return next;
-    });
-  };
-  const fetchVideoModels = async (testOnly = false) => {
-    const cfg = videoAnalysisSettings;
-    const root = cfg.baseUrl.trim().replace(/\/+$/, "");
-    if (!root) { setVideoModelTestResult("请先填写服务地址。"); return; }
-    setVideoModelBusy(true);
-    setVideoModelTestResult("");
-    try {
-      let endpoint = "";
-      const headers: Record<string, string> = {};
-      if (cfg.provider === "gemini") {
-        endpoint = root + "/v1beta/models";
-        if (cfg.apiKey.trim()) headers["x-goog-api-key"] = cfg.apiKey.trim();
-      } else if (cfg.provider === "anthropic") {
-        endpoint = root + "/v1/models";
-        if (cfg.apiKey.trim()) { headers["x-api-key"] = cfg.apiKey.trim(); headers["anthropic-version"] = "2023-06-01"; }
-      } else {
-        endpoint = root + "/models";
-        if (cfg.apiKey.trim()) headers.Authorization = "Bearer " + cfg.apiKey.trim();
-      }
-      const response = await fetch(endpoint, { headers, signal: AbortSignal.timeout(12000) });
-      const payload = await response.json().catch(() => null) as { models?: Array<{ name?: string; id?: string }>; data?: Array<{ id?: string; name?: string }>; error?: { message?: string } } | null;
-      if (!response.ok) throw new Error(payload?.error?.message || ("HTTP " + response.status));
-      const models = cfg.provider === "gemini"
-        ? (payload?.models || []).map(item => (item.name || "").replace(/^models\//, "")).filter(Boolean)
-        : (payload?.data || payload?.models || []).map(item => item.id || item.name || "").filter(Boolean);
-      setVideoModelOptions([...new Set(models)]);
-      setVideoModelTestResult(testOnly ? "API 连接成功。" + (models.length ? " 服务返回 " + models.length + " 个模型。" : " 但没有返回可识别的模型列表。") : (models.length ? ("刷新成功，获取到 " + models.length + " 个模型。") : "接口可访问，但没有识别到模型列表；仍可手动填写模型 ID。"));
-    } catch (error) {
-      setVideoModelTestResult("连接测试失败：" + (error instanceof Error ? error.message : String(error)) + "。若为 CORS/Failed to fetch，服务端可能未允许网页跨域访问。");
-    } finally { setVideoModelBusy(false); }
-  };
 
   /** 外部资料获取与角色回复分开：先读公开页面/搜索资料，再将其作为不可信参考上下文交给角色。 */
   useEffect(() => { kvSet(WATCH_CONTEXT_SETTINGS_KEY, JSON.stringify(watchContextSettings)); }, [watchContextSettings]);
@@ -1327,12 +1265,6 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
   const generateCommentRef = useRef(generateComment);
   useEffect(() => { generateCommentRef.current = generateComment; });
 
-  /** 把一帧画面交给角色：手动截图和静默截屏共用这一条路径。 */
-
-  /**
-   * 专注模式：将用户主动选择的本地视频作为完整文件交给 Gemini，
-   * 不再只依赖当前截图。使用角色在“一起看”中的现有 API 绑定与角色卡。
-   */
   const persistWatchShortTermMemory = (characterId: string, characterName: string, videoName: string, responseText: string, role: "user" | "assistant" = "assistant") => {
     try {
       appendCustomAppTimelineEntry({ id: "watch", name: "一起看" }, {
@@ -1347,116 +1279,14 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
     }
   };
 
-  const analyzeWholeLocalVideo = async (userQuestion?: string) => {
-    const file = localVideoFileRef.current;
-    if (!file || target?.platformName !== "本地视频") {
-      onNotice?.("请先在一起看里选择一个本地视频。");
-      return;
-    }
-    if (!character) {
-      onNotice?.("请先选择一个陪看角色。");
-      return;
-    }
-    if (wholeVideoBusy) return;
-
-    const videoSettings = loadVideoAnalysisSettings();
-    if (!videoSettings.apiKey.trim()) {
-      onNotice?.("请先打开「一起看 → 陪看方式 → 视频理解模型」配置所选服务的 API Key。");
-      return;
-    }
-
-    const controller = new AbortController();
-    wholeVideoAbortRef.current = controller;
-    setWholeVideoBusy(true);
-    setWholeVideoProgress("正在准备完整视频…");
-    try {
-      const sessions = loadChatSessions();
-      const contact = loadChatContacts().find(item => item.characterId === character.id);
-      const session = sessions.find(item => !item.isGroup && item.contactId === contact?.id)
-        ?? ({ id: `watch-together-${character.id}`, contactId: contact?.id ?? character.id, unreadCount: 0, updatedAt: new Date().toISOString(), isPinned: false, isGroup: false } as ChatSession);
-      const history = loadChatMessages(session.id).slice(-10)
-        .filter(item => item.status !== "failed" && !item.isRetracted)
-        .map(item => (item.role === "user" ? "用户" : character.name) + "：" + String(item.content || "").slice(0, 500))
-        .join("\n").slice(-3500);
-      const profile = character as unknown as Record<string, unknown>;
-      const roleDetails = [
-        typeof profile.description === "string" ? "角色介绍：" + profile.description : "",
-        typeof profile.personality === "string" ? "性格：" + profile.personality : "",
-        typeof profile.scenario === "string" ? "背景设定：" + profile.scenario : "",
-        typeof profile.systemPrompt === "string" ? "角色指令：" + profile.systemPrompt : "",
-      ].filter(Boolean).join("\n").slice(0, 5000);
-      const prompt = [
-        "请完整观看并理解用户上传的整段视频（包含可识别的画面、动作、场景变化以及模型可读取的音轨/对白），然后以角色身份与用户自然互动。",
-        "角色名：" + character.name + "。",
-        roleDetails,
-        "视频文件名：" + file.name + "；视频大小：" + (file.size / 1024 / 1024).toFixed(1) + " MB。",
-        videoTitle ? "用户给这段视频起的标题：" + videoTitle : "",
-        settings.currentMoment ? "用户补充的观看上下文：" + settings.currentMoment : "",
-        userQuestion ? "用户这次希望围绕视频回答的问题/讨论重点：" + userQuestion : "",
-        transcriptSegments.length ? "用户另行导入的字幕/脚本仅作为补充参考，不要用它替代实际视频内容。" : "",
-        history ? "近期聊天上下文：\n" + history : "",
-        "请像正在和用户一起看视频的角色一样说话，而不是冷冰冰的通用分析报告。先自然分享看完的感受，再提及几个确实来自视频的具体细节；如能可靠定位，可用时间点。不要编造看不清的细节，不要假装听清无法识别的音频，也不要剧透视频之外的内容。可指出剪辑节奏、镜头衔接、情绪或故事内容，但以真实视频为准。回复控制在约 150-350 字，使用角色自己的说话风格，并自然邀请用户继续聊。",
-      ].filter(Boolean).join("\n\n");
-
-      const responseText = await analyzeWholeVideoWithGemini({
-        file,
-        apiKey: videoSettings.apiKey,
-        model: videoSettings.model,
-        provider: videoSettings.provider,
-        baseUrl: videoSettings.baseUrl,
-        maxFileSizeMb: videoSettings.maxFileSizeMb,
-        frameCount: videoSettings.frameCount,
-        prompt,
-        signal: controller.signal,
-        onProgress: setWholeVideoProgress,
-      });
-      const comment: WatchComment = {
-        id: `whole-video-${Date.now()}`,
-        characterId: character.id,
-        characterName: character.name,
-        text: responseText,
-        createdAt: new Date().toISOString(),
-        kind: "character",
-        targetUrl: target.url,
-      };
-      setComments(current => {
-        const next = [...current, comment].slice(-100);
-        saveTargetComments(target.url, next);
-        return next;
-      });
-      persistWatchShortTermMemory(character.id, character.name, videoTitle || file.name, responseText);
-      if (settings.voiceEnabled) void speakComment(responseText, character.id);
-      onNotice?.("完整视频已观看完成，回应已加入一起看记录，并尝试写入角色短期记忆。");
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        onNotice?.("已取消完整视频分析。");
-      } else {
-        onNotice?.("完整视频观看失败：" + (error instanceof Error ? error.message : String(error)));
-      }
-    } finally {
-      if (wholeVideoAbortRef.current === controller) wholeVideoAbortRef.current = null;
-      setWholeVideoBusy(false);
-      setWholeVideoProgress("");
-    }
-  };
-
   const submitDiscussion = (rawText?: string) => {
     const text=(rawText ?? discussionDraft).trim(); if(!target||!text) return;
-    if (wholeVideoBusy) { onNotice?.("视频理解正在分析整段视频，请等这轮回应完成后再发送。"); return; }
     const timepoint=timepointDraft.trim().slice(0,16);
     const comment:WatchComment={id:`user-${Date.now()}`,characterId:"user",characterName:"我",text,createdAt:new Date().toISOString(),kind:"user",timepoint:timepoint||undefined,targetUrl:target.url};
     setComments(current=>{const next=[...current.slice(-99),comment];saveTargetComments(target.url,next);return next;});
     persistWatchShortTermMemory(character?.id ?? settings.characterId, character?.name ?? "角色", videoTitle || target.platformName + "视频", (timepoint ? "[" + timepoint + "] " : "") + text, "user");
     const moment=[timepoint ? `时间点 ${timepoint}` : "",text].filter(Boolean).join("：").slice(0,800);
     patchSettings({currentMoment:moment}); setDiscussionDraft("");
-    if (videoUnderstandingEnabled) {
-      if (localVideoFileRef.current && target.platformName === "本地视频") {
-        void analyzeWholeLocalVideo(moment);
-      } else {
-        onNotice?.("视频理解模式已开启，但当前是外站链接，无法直接把整段视频交给独立视频模型。请改选本地视频；外站只能通过截图/字幕让角色聊天模型辅助理解。");
-      }
-      return;
-    }
     if (!character) { onNotice?.("还没有可回应的陪看角色。请先在「观影设置」选择角色，或先去聊天 App 创建角色；这条讨论已为你留档。"); return; }
     if (commentBusyRef.current) {
       pendingDiscussionRef.current.push({ moment, timepoint: timepoint || undefined });
@@ -2274,11 +2104,10 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
               <div className="mb-2 flex flex-wrap items-center gap-1.5" style={{display:"flex",flex:"0 0 auto",flexWrap:"wrap",alignItems:"center",gap:6,visibility:"visible",opacity:1,overflow:"visible"}}>
                 <button type="button" onClick={markHighlightAndDiscuss} disabled={!target} className="watch-chat-chip" style={{display:"inline-flex",flex:"0 0 auto",alignItems:"center",visibility:"visible",opacity:1}}><Sparkles size={11}/>标记重点</button>
                 <button type="button" onClick={() => actTogether("我们来聊聊刚才的剧情发展和人物动机，只根据已出现的内容讨论。")} disabled={!target||!character||busy} className="watch-chat-chip" style={{display:"inline-flex",flex:"0 0 auto",alignItems:"center",visibility:"visible",opacity:1}}><MessageCircle size={11}/>讨论情节</button>
-                <button type="button" aria-pressed={videoUnderstandingEnabled} onClick={() => { setVideoUnderstandingEnabled(value => { const next=!value; try { window.localStorage.setItem("watch_video_understanding_enabled_v1", String(next)); } catch {} if(next) onNotice?.("已开启独立视频理解模式：发送讨论时会把本地视频交给已配置的视频分析模型；这与角色聊天模型不同。"); return next; }) }} className={"watch-chat-chip "+(videoUnderstandingEnabled?"watch-chat-chip-active":"")} style={{display:"inline-flex",flex:"0 0 auto",alignItems:"center",visibility:"visible",opacity:1}}><Sparkles size={11}/>视频理解</button>
               </div>
               <form onSubmit={event=>{event.preventDefault();submitDiscussion();}} className="flex min-w-0 items-center gap-2 rounded-full border border-[#d9c3ac] bg-[#fffdf8] p-1.5 shadow-[0_3px_12px_rgba(98,65,40,.08)]">
                 <textarea value={discussionDraft} onPointerDown={event=>event.stopPropagation()} onTouchStart={event=>event.stopPropagation()} onChange={event=>setDiscussionDraft(event.target.value.slice(0,800))} onKeyDown={event=>{if(event.key==="Enter"&&!event.shiftKey){event.preventDefault();submitDiscussion();}}} maxLength={800} rows={1} placeholder={target ? "聊聊这一帧，收藏心动与只有你们懂的梗……" : "先选一段能在小手机内播放的视频，再开始聊"} className="h-9 min-h-[36px] max-h-[36px] min-w-0 flex-1 resize-none border-0 bg-transparent px-3 py-2 text-[13px] leading-5 text-[#594536] outline-none placeholder:text-[#aa9683]" style={{height:36,minHeight:36,maxHeight:36,overflowY:"hidden"}}/>
-                <button type="submit" disabled={!target||!discussionDraft.trim()||wholeVideoBusy} className="inline-flex h-9 shrink-0 items-center gap-1 rounded-full bg-[#9b6b4c] px-3.5 text-xs font-semibold text-white shadow-sm disabled:opacity-35"><MessageCircle size={13}/>发送</button>
+                <button type="submit" disabled={!target||!discussionDraft.trim()} className="inline-flex h-9 shrink-0 items-center gap-1 rounded-full bg-[#9b6b4c] px-3.5 text-xs font-semibold text-white shadow-sm disabled:opacity-35"><MessageCircle size={13}/>发送</button>
               </form>
             </div>
 
@@ -2386,34 +2215,6 @@ export function WatchTogetherApp({ onClose, onNotice, initialUrl }: Props) {
             {localResolverStatus && <p role="status" aria-live="polite" className="mt-2 break-words text-[10px] leading-5 text-[#e6c49d]">{localResolverStatus}</p>}
             <button type="button" disabled={!localResolverJobRef.current} onClick={async () => { const job = localResolverJobRef.current; if (!job) return; try { const url = job.builtin ? "/api/watch-resolver/video/" + encodeURIComponent(job.id) : job.endpoint + "/api/videos/" + encodeURIComponent(job.id); await fetch(url, { method: "DELETE", headers: job.token ? { "X-Resolver-Token": job.token } : {} }); setLocalResolverStatus("已删除本次本地缓存；下次播放同一链接会重新下载。"); localResolverJobRef.current = null; } catch { setLocalResolverStatus("清理请求失败，请在服务端按缓存策略清理"); } }} className="mt-2 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-[11px] text-[#d8c9b6] disabled:opacity-40">删除本次本地缓存</button>
             </details>
-          </section>
-          <section className="mt-4 border-t border-white/10 pt-3">
-            <h3 className="font-serif text-sm text-[#e8c39a]">视频理解模型</h3>
-            <p className="mt-1 text-[10px] leading-5 text-[#8b8077]">独立于角色聊天模型。可手动输入 API 地址和模型 ID；刷新列表依赖服务商允许网页跨域访问。</p>
-            <label className="mt-2 block text-[11px] text-[#9c9086]">服务商
-              <select value={videoAnalysisSettings.provider} onChange={event => patchVideoAnalysisSettings({provider:event.target.value as VideoAnalysisSettings["provider"]})} className="mt-1 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-[#efe2d0] outline-none">
-                <option value="gemini">Google Gemini · 完整视频</option><option value="ark">火山方舟 / 豆包 · 完整视频</option><option value="twelvelabs">TwelveLabs · 视频理解</option><option value="openai-compatible">OpenAI 兼容 · 关键帧</option><option value="anthropic">Anthropic Claude · 关键帧</option>
-              </select>
-            </label>
-            <label className="mt-2 block text-[11px] text-[#9c9086]">视频模型 API URL
-              <input type="url" value={videoAnalysisSettings.baseUrl} onChange={event => patchVideoAnalysisSettings({baseUrl:event.target.value})} placeholder="https://api.example.com" className="mt-1 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-[#efe2d0] outline-none placeholder:text-[#6f665e]"/>
-            </label>
-            <label className="mt-2 block text-[11px] text-[#9c9086]">API Key
-              <input type="password" autoComplete="off" value={videoAnalysisSettings.apiKey} onChange={event => patchVideoAnalysisSettings({apiKey:event.target.value})} placeholder="仅保存在此设备" className="mt-1 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-[#efe2d0] outline-none placeholder:text-[#6f665e]"/>
-            </label>
-            <label className="mt-2 block text-[11px] text-[#9c9086]">模型 ID（可编辑 / 选择）
-              <input list="watch-video-model-options" value={videoAnalysisSettings.model} onChange={event => patchVideoAnalysisSettings({model:event.target.value})} placeholder="输入或从刷新后的列表选择" className="mt-1 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-[#efe2d0] outline-none placeholder:text-[#6f665e]"/>
-              <datalist id="watch-video-model-options">{videoModelOptions.map(model => <option key={model} value={model}/>)}</datalist>
-            </label>
-            <div className="mt-2 flex gap-2">
-              <button type="button" disabled={videoModelBusy} onClick={() => void fetchVideoModels()} className="flex-1 rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-[11px] text-[#d8c9b6] disabled:opacity-40">{videoModelBusy ? "正在连接…" : "刷新模型列表"}</button>
-              <button type="button" disabled={videoModelBusy} onClick={() => void fetchVideoModels(true)} className="flex-1 rounded-lg bg-[#c99a6a] px-3 py-2 text-[11px] font-medium text-[#2a1f16] disabled:opacity-40">测试 API 连接</button>
-            </div>
-            {videoModelTestResult && <p role="status" aria-live="polite" className="mt-2 break-words text-[10px] leading-5 text-[#e6c49d]">{videoModelTestResult}</p>}
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <label className="text-[10px] text-[#9c9086]">视频上限（MB）<input type="number" min={50} max={2048} value={videoAnalysisSettings.maxFileSizeMb} onChange={event => patchVideoAnalysisSettings({maxFileSizeMb:Number(event.target.value)})} className="mt-1 w-full rounded-lg border border-white/10 bg-black/30 px-2.5 py-2 text-xs text-[#efe2d0]"/></label>
-              <label className="text-[10px] text-[#9c9086]">关键帧数量（4–24）<input type="number" min={4} max={24} value={videoAnalysisSettings.frameCount} onChange={event => patchVideoAnalysisSettings({frameCount:Number(event.target.value)})} className="mt-1 w-full rounded-lg border border-white/10 bg-black/30 px-2.5 py-2 text-xs text-[#efe2d0]"/></label>
-            </div>
           </section>
           <section className="mt-4 border-t border-white/10 pt-3">
             <h3 className="font-serif text-sm text-[#e8c39a]">一起看 · 播放诊断</h3>
